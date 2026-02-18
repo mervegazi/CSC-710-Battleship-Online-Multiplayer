@@ -19,7 +19,8 @@ interface UseMatchmakingReturn {
  */
 async function createGame(
     player1Id: string,
-    player2Id: string
+    player2Id: string,
+    createdBy: string
 ): Promise<string> {
     // Randomly decide who goes first
     const firstPlayer = Math.random() < 0.5 ? player1Id : player2Id;
@@ -29,6 +30,7 @@ async function createGame(
         .insert({
             status: "setup",
             current_turn: firstPlayer,
+            created_by: createdBy,
         })
         .select("id")
         .single();
@@ -187,6 +189,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
 
                 const gameId = await createGame(
                     waitingPlayer.player_id as string,
+                    user.id,
                     user.id
                 );
 
