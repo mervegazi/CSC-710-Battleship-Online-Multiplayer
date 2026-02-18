@@ -204,34 +204,74 @@ export function useMatchmaking(): UseMatchmakingReturn {
             }
 
             try {
-                // Check for a waiting opponent
-                const { data: waitingPlayer } = await supabase
+                // 1. Check if WE are still in the queue
+                const { data: myEntry } = await supabase
                     .from("matchmaking_queue")
-                    .select("*")
-                    .neq("player_id", user.id)
-                    .order("joined_at", { ascending: true })
-                    .limit(1)
+                    .select("id")
+                    .eq("player_id", user.id)
                     .maybeSingle();
 
-                if (waitingPlayer && statusRef.current === "searching") {
-                    // Match found! Remove both from queue
-                    await supabase
+                if (!myEntry && statusRef.current === "searching") {
+                    // We were removed from the queue — someone matched us!
+                    // Find our most recent game assignment
+                    const { data: gameEntry } = await supabase
+                        .from("games_players")
+                        .select("game_id")
+                        .eq("player_id", user.id)
+                        .order("id", { ascending: false })
+                        .limit(1)
+                        .maybeSingle();
+
+                    if (gameEntry) {
+                        // Find opponent in the same game
+                        const { data: opponent } = await supabase
+                            .from("games_players")
+                            .select("player_id")
+                            .eq("game_id", gameEntry.game_id)
+                            .neq("player_id", user.id)
+                            .maybeSingle();
+
+                        await handleMatchFound(
+                            gameEntry.game_id,
+                            opponent?.player_id ?? ""
+                        );
+                        return;
+                    }
+                }
+
+                // 2. Also try to actively match with someone in the queue
+                if (myEntry) {
+                    const { data: waitingPlayer } = await supabase
                         .from("matchmaking_queue")
-                        .delete()
-                        .eq("id", waitingPlayer.id);
+                        .select("*")
+                        .neq("player_id", user.id)
+                        .order("joined_at", { ascending: true })
+                        .limit(1)
+                        .maybeSingle();
 
-                    await supabase
-                        .from("matchmaking_queue")
-                        .delete()
-                        .eq("player_id", user.id);
+                    if (waitingPlayer && statusRef.current === "searching") {
+                        // Match found! Remove both from queue
+                        await supabase
+                            .from("matchmaking_queue")
+                            .delete()
+                            .eq("id", waitingPlayer.id);
 
-                    const gameId = await createGame(
-                        waitingPlayer.player_id as string,
-                        user.id,
-                        user.id
-                    );
+                        await supabase
+                            .from("matchmaking_queue")
+                            .delete()
+                            .eq("player_id", user.id);
 
-                    await handleMatchFound(gameId, waitingPlayer.player_id as string);
+                        const gameId = await createGame(
+                            waitingPlayer.player_id as string,
+                            user.id,
+                            user.id
+                        );
+
+                        await handleMatchFound(
+                            gameId,
+                            waitingPlayer.player_id as string
+                        );
+                    }
                 }
             } catch {
                 // Silently ignore polling errors — will retry on next interval
