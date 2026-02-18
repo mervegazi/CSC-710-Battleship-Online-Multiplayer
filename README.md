@@ -1,5 +1,7 @@
 # CSC-710-Battleship-Online-Multiplayer
 
+> **Live Demo:** [mervegazi.github.io/CSC-710-Battleship-Online-Multiplayer](https://mervegazi.github.io/CSC-710-Battleship-Online-Multiplayer/)
+
 ## Stack
 
 - React
