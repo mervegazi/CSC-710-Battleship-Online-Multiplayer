@@ -1,5 +1,15 @@
 // src/types/index.ts — matches tech doc Section 13.2
 
+// Lobby & Presence types (tech doc Section 8.2)
+export type LobbyStatus = 'idle' | 'in_queue' | 'hosting_table' | 'in_game';
+
+export interface PresenceState {
+  user_id: string;
+  display_name: string;
+  status: LobbyStatus;
+  joined_at: string;
+}
+
 export type GameStatus = 'setup' | 'in_progress' | 'finished' | 'abandoned';
 export type MoveResult = 'hit' | 'miss' | 'sunk';
 export type TableStatus = 'waiting' | 'full' | 'in_game' | 'closed';

@@ -1,40 +1,47 @@
 import { useAuth } from "../hooks/useAuth";
-import { Button } from "../components/common/Button";
+import { useLobby } from "../hooks/useLobby";
+import { LobbyHeader } from "../components/lobby/LobbyHeader";
+import { LobbyStats } from "../components/lobby/LobbyStats";
+import { OnlineUsersList } from "../components/lobby/OnlineUsersList";
+import { QuickMatchButton } from "../components/lobby/QuickMatchButton";
+import { CreateTableButton } from "../components/lobby/CreateTableButton";
+import { TableList } from "../components/lobby/TableList";
+import { LobbyChat } from "../components/lobby/LobbyChat";
 
 export function LobbyPage() {
-  const { user, profile, signOut } = useAuth();
-
-  const displayName =
-    profile?.display_name ??
-    (user?.user_metadata as { display_name?: string })?.display_name ??
-    "Player";
-
-  const handleSignOut = async () => {
-    try {
-      await signOut();
-    } catch {
-      // onAuthStateChange will handle state cleanup
-    }
-  };
+  const { user } = useAuth();
+  const { onlineUsers, stats } = useLobby();
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 px-6 py-16">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold">Lobby</h1>
-          <Button variant="secondary" onClick={handleSignOut}>
-            Sign Out
-          </Button>
+    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <LobbyHeader />
+
+      <div className="flex flex-1 flex-col gap-4 p-4 lg:grid lg:grid-cols-[280px_1fr] lg:gap-6 lg:p-6">
+        {/* Sidebar */}
+        <div className="flex flex-col gap-4">
+          <LobbyStats stats={stats} />
+
+          <div className="flex gap-3 lg:flex-col">
+            <div className="flex-1">
+              <QuickMatchButton />
+            </div>
+            <div className="flex-1">
+              <CreateTableButton />
+            </div>
+          </div>
+
+          <OnlineUsersList
+            users={onlineUsers}
+            currentUserId={user?.id ?? ""}
+          />
         </div>
 
-        <p className="text-slate-300">
-          Welcome, <span className="font-semibold text-blue-400">{displayName}</span>!
-        </p>
-
-        <div className="rounded-xl border border-slate-800 bg-slate-900 p-8 text-center text-slate-400">
-          Matchmaking, tables, and chat will be built in Phase 2.
+        {/* Main content */}
+        <div className="flex flex-col gap-4">
+          <TableList />
+          <LobbyChat />
         </div>
       </div>
-    </main>
+    </div>
   );
 }
