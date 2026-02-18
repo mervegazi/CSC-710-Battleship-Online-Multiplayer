@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { useLobby } from "../hooks/useLobby";
 import { LobbyHeader } from "../components/lobby/LobbyHeader";
@@ -7,10 +8,25 @@ import { QuickMatchButton } from "../components/lobby/QuickMatchButton";
 import { CreateTableButton } from "../components/lobby/CreateTableButton";
 import { TableList } from "../components/lobby/TableList";
 import { LobbyChat } from "../components/lobby/LobbyChat";
+import type { LobbyStatus } from "../types";
 
 export function LobbyPage() {
   const { user } = useAuth();
-  const { onlineUsers, stats } = useLobby();
+  const { onlineUsers, stats, updateStatus } = useLobby();
+
+  // Update presence status when matchmaking state changes
+  const handleMatchmakingStatusChange = useCallback(
+    (matchStatus: string) => {
+      if (matchStatus === "searching") {
+        updateStatus("in_queue" as LobbyStatus);
+      } else if (matchStatus === "matched") {
+        updateStatus("in_game" as LobbyStatus);
+      } else {
+        updateStatus("idle" as LobbyStatus);
+      }
+    },
+    [updateStatus]
+  );
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
@@ -23,7 +39,9 @@ export function LobbyPage() {
 
           <div className="flex gap-3 lg:flex-col">
             <div className="flex-1">
-              <QuickMatchButton />
+              <QuickMatchButton
+                onStatusChange={handleMatchmakingStatusChange}
+              />
             </div>
             <div className="flex-1">
               <CreateTableButton />
