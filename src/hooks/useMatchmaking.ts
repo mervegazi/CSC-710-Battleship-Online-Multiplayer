@@ -9,6 +9,7 @@ interface UseMatchmakingReturn {
     status: MatchmakingStatus;
     error: string | null;
     matchedGameId: string | null;
+    matchedOpponent: string | null;
     joinQueue: () => Promise<void>;
     leaveQueue: () => Promise<void>;
 }
@@ -66,18 +67,33 @@ async function createGame(
     return game.id;
 }
 
+/**
+ * Fetch opponent display name from profiles table.
+ */
+async function getOpponentName(opponentId: string): Promise<string> {
+    const { data } = await supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("id", opponentId)
+        .maybeSingle();
+    return data?.display_name ?? "Unknown Captain";
+}
+
 export function useMatchmaking(): UseMatchmakingReturn {
     const { user } = useAuth();
     const [status, setStatus] = useState<MatchmakingStatus>("idle");
     const [error, setError] = useState<string | null>(null);
     const [matchedGameId, setMatchedGameId] = useState<string | null>(null);
+    const [matchedOpponent, setMatchedOpponent] = useState<string | null>(null);
     const channelRef = useRef<RealtimeChannel | null>(null);
     const statusRef = useRef<MatchmakingStatus>("idle");
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const SEARCH_TIMEOUT_MS = 30000; // 30 seconds
+    const POLL_INTERVAL_MS = 3000; // poll every 3 seconds
 
-    // Keep a ref in sync so the realtime callback sees the latest status
+    // Keep a ref in sync so callbacks see the latest status
     useEffect(() => {
         statusRef.current = status;
     }, [status]);
@@ -91,6 +107,34 @@ export function useMatchmaking(): UseMatchmakingReturn {
         }, 15000);
         return () => clearTimeout(resetTimer);
     }, [status]);
+
+    /**
+     * Handle a successful match — set state and fetch opponent name.
+     */
+    const handleMatchFound = useCallback(
+        async (gameId: string, opponentId: string) => {
+            // Clean up polling and timeout
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+            }
+            if (timeoutRef.current) {
+                clearTimeout(timeoutRef.current);
+                timeoutRef.current = null;
+            }
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+                channelRef.current = null;
+            }
+
+            const opponentName = await getOpponentName(opponentId);
+            setMatchedGameId(gameId);
+            setMatchedOpponent(opponentName);
+            setStatus("matched");
+            statusRef.current = "matched";
+        },
+        []
+    );
 
     /**
      * Subscribe to `games_players` inserts for the current user.
@@ -114,41 +158,101 @@ export function useMatchmaking(): UseMatchmakingReturn {
                     table: "games_players",
                     filter: `player_id=eq.${user.id}`,
                 },
-                (payload) => {
+                async (payload) => {
                     // Only react if we are still searching
                     if (statusRef.current === "searching") {
                         const gameId = (payload.new as { game_id: string }).game_id;
-                        setMatchedGameId(gameId);
-                        setStatus("matched");
+
+                        // Find opponent from games_players
+                        const { data: players } = await supabase
+                            .from("games_players")
+                            .select("player_id")
+                            .eq("game_id", gameId)
+                            .neq("player_id", user.id)
+                            .maybeSingle();
+
+                        const opponentId = players?.player_id ?? "";
+
                         // Clean up queue entry (if it still exists)
                         supabase
                             .from("matchmaking_queue")
                             .delete()
                             .eq("player_id", user.id)
                             .then(() => { });
+
+                        await handleMatchFound(gameId, opponentId);
                     }
                 }
             )
             .subscribe();
 
         channelRef.current = channel;
-    }, [user]);
+    }, [user, handleMatchFound]);
+
+    /**
+     * Poll the queue for opponents. This is a fallback for cases where:
+     * - Both players join at the same time and miss each other
+     * - Realtime subscription isn't delivering events
+     */
+    const startPolling = useCallback(() => {
+        if (!user) return;
+
+        pollingRef.current = setInterval(async () => {
+            if (statusRef.current !== "searching") {
+                if (pollingRef.current) clearInterval(pollingRef.current);
+                return;
+            }
+
+            try {
+                // Check for a waiting opponent
+                const { data: waitingPlayer } = await supabase
+                    .from("matchmaking_queue")
+                    .select("*")
+                    .neq("player_id", user.id)
+                    .order("joined_at", { ascending: true })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (waitingPlayer && statusRef.current === "searching") {
+                    // Match found! Remove both from queue
+                    await supabase
+                        .from("matchmaking_queue")
+                        .delete()
+                        .eq("id", waitingPlayer.id);
+
+                    await supabase
+                        .from("matchmaking_queue")
+                        .delete()
+                        .eq("player_id", user.id);
+
+                    const gameId = await createGame(
+                        waitingPlayer.player_id as string,
+                        user.id,
+                        user.id
+                    );
+
+                    await handleMatchFound(gameId, waitingPlayer.player_id as string);
+                }
+            } catch {
+                // Silently ignore polling errors — will retry on next interval
+            }
+        }, POLL_INTERVAL_MS);
+    }, [user, handleMatchFound]);
 
     /**
      * Join the matchmaking queue.
-     *
-     * Flow:
-     * 1. Check if there is a waiting player in the queue (FIFO).
-     * 2a. If found → remove them, create a game, navigate both players.
-     * 2b. If not found → insert self into queue and wait for realtime notification.
      */
     const joinQueue = useCallback(async () => {
         if (!user) return;
 
-        // Clear any previous timeout and channel from a prior search
+        // Clear any previous timeout, polling, and channel
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
             timeoutRef.current = null;
+        }
+        if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
         }
         if (channelRef.current) {
             supabase.removeChannel(channelRef.current);
@@ -157,8 +261,9 @@ export function useMatchmaking(): UseMatchmakingReturn {
 
         setError(null);
         setStatus("searching");
-        statusRef.current = "searching"; // update ref immediately
+        statusRef.current = "searching";
         setMatchedGameId(null);
+        setMatchedOpponent(null);
 
         try {
             // First, make sure we're not already in the queue
@@ -193,28 +298,32 @@ export function useMatchmaking(): UseMatchmakingReturn {
                     user.id
                 );
 
-                setMatchedGameId(gameId);
-                setStatus("matched");
+                await handleMatchFound(gameId, waitingPlayer.player_id as string);
             } else {
-                // No one waiting — join queue and subscribe for match notification
+                // No one waiting — join queue
                 const { error: insertError } = await supabase
                     .from("matchmaking_queue")
                     .insert({ player_id: user.id });
 
                 if (insertError) {
-                    // If duplicate key, we're already in queue — that's fine
                     if (!insertError.message.includes("duplicate")) {
                         throw new Error(insertError.message);
                     }
                 }
 
-                // Listen for a game being created that includes us
+                // Listen for a game being created that includes us (realtime)
                 subscribeToMatch();
+
+                // Also poll the queue as a fallback (race condition safety net)
+                startPolling();
 
                 // Start timeout timer
                 timeoutRef.current = setTimeout(async () => {
                     if (statusRef.current === "searching") {
-                        // Remove from queue
+                        if (pollingRef.current) {
+                            clearInterval(pollingRef.current);
+                            pollingRef.current = null;
+                        }
                         try {
                             await supabase
                                 .from("matchmaking_queue")
@@ -237,7 +346,7 @@ export function useMatchmaking(): UseMatchmakingReturn {
             setError(message);
             setStatus("error");
         }
-    }, [user, subscribeToMatch]);
+    }, [user, subscribeToMatch, startPolling, handleMatchFound]);
 
     /**
      * Leave the matchmaking queue / cancel search.
@@ -264,12 +373,18 @@ export function useMatchmaking(): UseMatchmakingReturn {
             timeoutRef.current = null;
         }
 
+        if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+        }
+
         setStatus("idle");
         setError(null);
         setMatchedGameId(null);
+        setMatchedOpponent(null);
     }, [user]);
 
-    // Cleanup on unmount — remove from queue and unsubscribe
+    // Cleanup on unmount
     useEffect(() => {
         return () => {
             if (user && statusRef.current === "searching") {
@@ -287,8 +402,12 @@ export function useMatchmaking(): UseMatchmakingReturn {
                 clearTimeout(timeoutRef.current);
                 timeoutRef.current = null;
             }
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+            }
         };
     }, [user]);
 
-    return { status, error, matchedGameId, joinQueue, leaveQueue };
+    return { status, error, matchedGameId, matchedOpponent, joinQueue, leaveQueue };
 }
