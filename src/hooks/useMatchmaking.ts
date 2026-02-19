@@ -248,7 +248,9 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                 if (waitingPlayer && statusRef.current === "searching") {
                     // Check if opponent is actually online using the REF
                     const currentOnlineIds = onlineUserIdsRef.current;
-                    if (currentOnlineIds.size > 0 && !currentOnlineIds.has(waitingPlayer.player_id)) {
+                    const isPresenceActive = currentOnlineIds.size > 0 && currentOnlineIds.has(user.id);
+
+                    if (isPresenceActive && !currentOnlineIds.has(waitingPlayer.player_id)) {
                         // Opponent is offline -> remove stale entry
                         await supabase
                             .from("matchmaking_queue")
@@ -329,8 +331,10 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
             if (queryError) throw new Error(queryError.message);
 
             if (waitingPlayer) {
-                // Check if opponent is actually online
-                if (onlineUserIds && !onlineUserIds.has(waitingPlayer.player_id)) {
+                // Check if opponent is actually online - BUT only if presence is confirmed working
+                const isPresenceActive = onlineUserIds && onlineUserIds.has(user.id);
+
+                if (isPresenceActive && !onlineUserIds.has(waitingPlayer.player_id)) {
                     // Opponent is offline -> remove stale entry
                     await supabase
                         .from("matchmaking_queue")
