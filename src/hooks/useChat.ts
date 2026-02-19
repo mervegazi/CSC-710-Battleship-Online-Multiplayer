@@ -29,48 +29,71 @@ export function useChat(channel = "lobby"): UseChatReturn {
             ?.display_name ??
         "Player";
 
-    // Load initial messages and subscribe to new ones
+    /**
+     * Fetch messages from DB. Handles both initial load and polling updates.
+     * Silent update by default (loading=false), but can trigger loading state if needed.
+     */
+    const loadMessages = useCallback(async (isInitial = false) => {
+        if (isInitial) setLoading(true);
+
+        const { data, error: fetchError } = await supabase
+            .from("chat_messages")
+            .select("*")
+            .eq("channel", channel)
+            .order("created_at", { ascending: false })
+            .limit(INITIAL_LOAD_COUNT);
+
+        if (fetchError) {
+            // If table doesn't exist yet, show empty chat silently
+            if (
+                fetchError.code === "42P01" ||
+                fetchError.message?.includes("does not exist")
+            ) {
+                console.warn("chat_messages table does not exist yet.");
+                setMessages([]);
+                setLoading(false);
+                return;
+            }
+            if (isInitial) {
+                setError(fetchError.message);
+                setLoading(false);
+            }
+            return;
+        }
+
+        if (data) {
+            const newMessages = (data as ChatMessage[]).reverse();
+            setMessages((prev) => {
+                // Simple check to avoid unnecessary re-renders
+                // If the last message ID and total count are the same, assume no change
+                // (Though strictly speaking an edit/delete in middle would require deep check, 
+                // but for append-only chat this is efficient)
+                const lastPrev = prev[prev.length - 1];
+                const lastNew = newMessages[newMessages.length - 1];
+
+                if (
+                    prev.length === newMessages.length &&
+                    lastPrev?.id === lastNew?.id
+                ) {
+                    return prev;
+                }
+                return newMessages;
+            });
+        }
+
+        if (isInitial) setLoading(false);
+    }, [channel]);
+
+    // Initial load and Realtime subscription
     useEffect(() => {
         if (!user) return;
 
         let cancelled = false;
 
-        // Fetch the last N messages
-        const loadMessages = async () => {
-            setLoading(true);
-            const { data, error: fetchError } = await supabase
-                .from("chat_messages")
-                .select("*")
-                .eq("channel", channel)
-                .order("created_at", { ascending: false })
-                .limit(INITIAL_LOAD_COUNT);
+        // 1. Initial Load
+        loadMessages(true);
 
-            if (cancelled) return;
-
-            if (fetchError) {
-                // If table doesn't exist yet, show empty chat silently
-                if (
-                    fetchError.code === "42P01" ||
-                    fetchError.message?.includes("does not exist")
-                ) {
-                    console.warn("chat_messages table does not exist yet.");
-                    setMessages([]);
-                    setLoading(false);
-                    return;
-                }
-                setError(fetchError.message);
-                setLoading(false);
-                return;
-            }
-
-            // Data comes in descending order, reverse for chronological display
-            setMessages((data as ChatMessage[]).reverse());
-            setLoading(false);
-        };
-
-        loadMessages();
-
-        // Subscribe to new inserts on chat_messages for this channel
+        // 2. Realtime Subscription
         const realtimeChannel = supabase
             .channel(`chat-${channel}`)
             .on(
@@ -87,91 +110,86 @@ export function useChat(channel = "lobby"): UseChatReturn {
                         if (newMsg.channel !== channel) return;
 
                         setMessages((prev) => {
-                            // Avoid duplicates (e.g. from optimistic insert)
+                            // Avoid duplicates
                             if (prev.some((m) => m.id === newMsg.id)) return prev;
                             return [...prev, newMsg];
                         });
                     }
                 }
             )
-            .subscribe();
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    // console.log('Chat subscribed');
+                }
+            });
 
         channelRef.current = realtimeChannel;
 
+        // 3. Polling Fallback (every 3s)
+        const interval = setInterval(() => {
+            if (!cancelled) {
+                loadMessages(false);
+            }
+        }, 3000);
+
         return () => {
             cancelled = true;
+            clearInterval(interval);
             if (channelRef.current) {
                 supabase.removeChannel(channelRef.current);
                 channelRef.current = null;
             }
         };
-    }, [user, channel]);
+    }, [user, channel, loadMessages]);
+
 
     /**
      * Send a chat message to the lobby channel.
      */
-    const sendMessage = useCallback(
-        async (text: string) => {
-            if (!user) return;
+    const sendMessage = async (text: string) => {
+        if (!text.trim() || !user) return;
 
-            const trimmed = text.trim();
-            if (!trimmed) return;
-            if (trimmed.length > MAX_MESSAGE_LENGTH) {
-                setError(`Message must be ${MAX_MESSAGE_LENGTH} characters or less.`);
-                return;
+        setSending(true);
+        setError(null);
+
+        try {
+            if (text.length > MAX_MESSAGE_LENGTH) {
+                throw new Error(
+                    `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`
+                );
             }
 
-            setSending(true);
-            setError(null);
-
-            // Create an optimistic message that shows immediately
-            const tempId = `temp-${Date.now()}`;
+            // Optimistic update
             const optimisticMsg: ChatMessage = {
-                id: tempId,
+                id: crypto.randomUUID(),
                 sender_id: user.id,
                 sender_name: displayName,
-                message: trimmed,
+                message: text.trim(),
                 channel,
                 created_at: new Date().toISOString(),
             };
 
-            // Show it immediately in the UI
             setMessages((prev) => [...prev, optimisticMsg]);
 
-            try {
-                const { data, error: insertError } = await supabase
-                    .from("chat_messages")
-                    .insert({
-                        sender_id: user.id,
-                        sender_name: displayName,
-                        message: trimmed,
-                        channel,
-                    })
-                    .select()
-                    .single();
+            const { error: sendError } = await supabase.from("chat_messages").insert({
+                sender_id: user.id,
+                sender_name: displayName, // Denormalize name for simplicity
+                message: text.trim(),
+                channel,
+            });
 
-                if (insertError) {
-                    throw new Error(insertError.message);
-                }
+            if (sendError) throw new Error(sendError.message);
+        } catch (err) {
+            const message =
+                err instanceof Error ? err.message : "Failed to send message";
+            setError(message);
 
-                // Replace the temp message with the real one from DB
-                if (data) {
-                    setMessages((prev) =>
-                        prev.map((m) => (m.id === tempId ? (data as ChatMessage) : m))
-                    );
-                }
-            } catch (err) {
-                // Remove the optimistic message on failure
-                setMessages((prev) => prev.filter((m) => m.id !== tempId));
-                const message =
-                    err instanceof Error ? err.message : "Failed to send message";
-                setError(message);
-            } finally {
-                setSending(false);
-            }
-        },
-        [user, displayName, channel]
-    );
+            // Revert optimistic update on error (reload from server)
+            loadMessages(false);
+        } finally {
+            setSending(false);
+        }
+    };
 
     return { messages, sending, loading, error, sendMessage };
 }
