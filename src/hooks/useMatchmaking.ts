@@ -182,10 +182,17 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
         channelRef.current = channel;
     }, [user, handleMatchFound]);
 
+    // Keep a ref of online users to avoid closure staleness in setInterval
+    const onlineUserIdsRef = useRef<Set<string>>(new Set());
+
+    useEffect(() => {
+        if (onlineUserIds) {
+            onlineUserIdsRef.current = onlineUserIds;
+        }
+    }, [onlineUserIds]);
+
     /**
-     * Poll to detect matches. Two strategies:
-     * 1. Check if we've been assigned to a NEW game (opponent matched us)
-     * 2. Check if there's someone in the queue we can match with
+     * Poll to detect matches.
      */
     const startPolling = useCallback(() => {
         if (!user) return;
@@ -204,13 +211,11 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     .eq("player_id", user.id);
 
                 if (myGames) {
-                    // Find a game ID that didn't exist before we started searching
                     const newGame = myGames.find(
                         (g) => !existingGameIdsRef.current.has(g.game_id)
                     );
 
                     if (newGame && statusRef.current === "searching") {
-                        // We've been matched by someone else!
                         const { data: opponent } = await supabase
                             .from("games_players")
                             .select("player_id")
@@ -218,7 +223,6 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                             .neq("player_id", user.id)
                             .maybeSingle();
 
-                        // Remove from queue just in case
                         await supabase
                             .from("matchmaking_queue")
                             .delete()
@@ -242,9 +246,10 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     .maybeSingle();
 
                 if (waitingPlayer && statusRef.current === "searching") {
-                    // Check if opponent is actually online
-                    if (onlineUserIds && !onlineUserIds.has(waitingPlayer.player_id)) {
-                        // Opponent is offline -> remove stale entry and continue searching (next poll)
+                    // Check if opponent is actually online using the REF
+                    const currentOnlineIds = onlineUserIdsRef.current;
+                    if (currentOnlineIds.size > 0 && !currentOnlineIds.has(waitingPlayer.player_id)) {
+                        // Opponent is offline -> remove stale entry
                         await supabase
                             .from("matchmaking_queue")
                             .delete()
@@ -276,7 +281,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     );
                 }
             } catch {
-                // Silently ignore — will retry next interval
+                // Silently ignore
             }
         }, POLL_INTERVAL_MS);
     }, [user, handleMatchFound]);
