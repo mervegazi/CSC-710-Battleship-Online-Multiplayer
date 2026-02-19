@@ -95,7 +95,10 @@ export function QuickMatchButton({ onStatusChange, onlineUserIds }: QuickMatchBu
       {/* Match Found Modal */}
       <Modal
         isOpen={showMatchModal}
-        onClose={() => setShowMatchModal(false)}
+        onClose={() => {
+          setShowMatchModal(false);
+          leaveQueue();
+        }}
         title="⚓ Battle Stations!"
       >
         <div className="flex flex-col items-center gap-4 py-2">
@@ -144,11 +147,13 @@ export function QuickMatchButton({ onStatusChange, onlineUserIds }: QuickMatchBu
             </p>
           </div>
 
-          {/* Close button */}
           <Button
             fullWidth
             variant="secondary"
-            onClick={() => setShowMatchModal(false)}
+            onClick={() => {
+              setShowMatchModal(false);
+              leaveQueue();
+            }}
           >
             Return to Lobby
           </Button>
