@@ -5,11 +5,12 @@ import { useMatchmaking } from "../../hooks/useMatchmaking";
 
 interface QuickMatchButtonProps {
   onStatusChange?: (status: string) => void;
+  onlineUserIds: Set<string>;
 }
 
-export function QuickMatchButton({ onStatusChange }: QuickMatchButtonProps) {
+export function QuickMatchButton({ onStatusChange, onlineUserIds }: QuickMatchButtonProps) {
   const { status, error, matchedGameId, matchedOpponent, joinQueue, leaveQueue } =
-    useMatchmaking();
+    useMatchmaking(onlineUserIds);
   const [showMatchModal, setShowMatchModal] = useState(false);
 
   // Show modal when matched

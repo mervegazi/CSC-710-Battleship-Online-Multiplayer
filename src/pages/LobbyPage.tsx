@@ -41,6 +41,7 @@ export function LobbyPage() {
             <div className="flex-1">
               <QuickMatchButton
                 onStatusChange={handleMatchmakingStatusChange}
+                onlineUserIds={new Set(onlineUsers.map((u) => u.user_id))}
               />
             </div>
             <div className="flex-1">

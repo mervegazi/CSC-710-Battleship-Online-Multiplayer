@@ -73,7 +73,7 @@ async function getOpponentName(opponentId: string): Promise<string> {
     return data?.display_name ?? "Unknown Captain";
 }
 
-export function useMatchmaking(): UseMatchmakingReturn {
+export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingReturn {
     const { user } = useAuth();
     const [status, setStatus] = useState<MatchmakingStatus>("idle");
     const [error, setError] = useState<string | null>(null);
@@ -242,6 +242,16 @@ export function useMatchmaking(): UseMatchmakingReturn {
                     .maybeSingle();
 
                 if (waitingPlayer && statusRef.current === "searching") {
+                    // Check if opponent is actually online
+                    if (onlineUserIds && !onlineUserIds.has(waitingPlayer.player_id)) {
+                        // Opponent is offline -> remove stale entry and continue searching (next poll)
+                        await supabase
+                            .from("matchmaking_queue")
+                            .delete()
+                            .eq("id", waitingPlayer.id);
+                        return;
+                    }
+
                     // Remove opponent from queue
                     await supabase
                         .from("matchmaking_queue")
@@ -314,19 +324,53 @@ export function useMatchmaking(): UseMatchmakingReturn {
             if (queryError) throw new Error(queryError.message);
 
             if (waitingPlayer) {
-                // Match found immediately
-                await supabase
-                    .from("matchmaking_queue")
-                    .delete()
-                    .eq("id", waitingPlayer.id);
+                // Check if opponent is actually online
+                if (onlineUserIds && !onlineUserIds.has(waitingPlayer.player_id)) {
+                    // Opponent is offline -> remove stale entry
+                    await supabase
+                        .from("matchmaking_queue")
+                        .delete()
+                        .eq("id", waitingPlayer.id);
 
-                const gameId = await createGame(
-                    waitingPlayer.player_id as string,
-                    user.id,
-                    user.id
-                );
+                    // Proceed to join queue as if no one was waiting
+                    const { error: insertError } = await supabase
+                        .from("matchmaking_queue")
+                        .insert({ player_id: user.id });
 
-                await handleMatchFound(gameId, waitingPlayer.player_id as string);
+                    if (insertError && !insertError.message.includes("duplicate")) {
+                        throw new Error(insertError.message);
+                    }
+
+                    subscribeToMatch();
+                    startPolling();
+
+                    timeoutRef.current = setTimeout(async () => {
+                        if (statusRef.current === "searching") {
+                            cleanup();
+                            try {
+                                await supabase
+                                    .from("matchmaking_queue")
+                                    .delete()
+                                    .eq("player_id", user.id);
+                            } catch { /* ignore */ }
+                            setStatus("timeout");
+                        }
+                    }, SEARCH_TIMEOUT_MS);
+                } else {
+                    // Match found immediately
+                    await supabase
+                        .from("matchmaking_queue")
+                        .delete()
+                        .eq("id", waitingPlayer.id);
+
+                    const gameId = await createGame(
+                        waitingPlayer.player_id as string,
+                        user.id,
+                        user.id
+                    );
+
+                    await handleMatchFound(gameId, waitingPlayer.player_id as string);
+                }
             } else {
                 // Join queue and wait
                 const { error: insertError } = await supabase

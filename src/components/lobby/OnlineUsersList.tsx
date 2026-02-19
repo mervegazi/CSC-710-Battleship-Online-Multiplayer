@@ -6,10 +6,10 @@ interface OnlineUsersListProps {
 }
 
 const STATUS_COLORS: Record<LobbyStatus, string> = {
-  idle: "bg-green-500",
+  idle: "bg-yellow-500",
   in_queue: "bg-yellow-500",
   hosting_table: "bg-blue-500",
-  in_game: "bg-red-500",
+  in_game: "bg-yellow-500",
 };
 
 export function OnlineUsersList({ users, currentUserId }: OnlineUsersListProps) {
