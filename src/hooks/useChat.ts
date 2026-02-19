@@ -79,11 +79,13 @@ export function useChat(channel = "lobby"): UseChatReturn {
                     event: "INSERT",
                     schema: "public",
                     table: "chat_messages",
-                    filter: `channel=eq.${channel}`,
                 },
-                (payload) => {
+                (payload: any) => {
                     if (!cancelled) {
                         const newMsg = payload.new as ChatMessage;
+                        // Client-side filtering
+                        if (newMsg.channel !== channel) return;
+
                         setMessages((prev) => {
                             // Avoid duplicates (e.g. from optimistic insert)
                             if (prev.some((m) => m.id === newMsg.id)) return prev;

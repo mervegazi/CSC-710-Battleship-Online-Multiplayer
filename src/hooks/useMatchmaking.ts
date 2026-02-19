@@ -216,7 +216,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
 
                     // Find a game ID that didn't exist before we started searching
                     const newGame = myGames.find(
-                        (g) => !existingGameIdsRef.current.has(g.game_id)
+                        (g: { game_id: string }) => !existingGameIdsRef.current.has(g.game_id)
                     );
 
                     if (newGame && statusRef.current === "searching") {
@@ -272,7 +272,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     }
 
                     // Find first online opponent
-                    const opponent = waitingPlayers.find(p => currentOnlineIds.has(p.player_id));
+                    const opponent = waitingPlayers.find((p: any) => currentOnlineIds.has(p.player_id));
 
                     if (opponent) {
                         // Found an online opponent! Match!
@@ -280,7 +280,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                             .from("matchmaking_queue")
                             .delete()
                             .eq("id", opponent.id)
-                            .then(({ error }) => {
+                            .then(({ error }: { error: any }) => {
                                 // Note: This delete might fail if RLS restriction exists,
                                 // but we proceed to create game anyway.
                                 // Ideally RLS should allow matching trigger deletion or we rely on them deleting themselves.
@@ -358,7 +358,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
 
             // Find first online opponent
             const opponent = isPresenceActive
-                ? waitingPlayers?.find(p => onlineUserIds.has(p.player_id))
+                ? waitingPlayers?.find((p: any) => onlineUserIds.has(p.player_id))
                 : null;
 
             // If we found a player AND presence system is ready -> MATCH IMMEDIATELY
