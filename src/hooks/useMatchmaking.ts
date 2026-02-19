@@ -87,13 +87,22 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
     const existingGameIdsRef = useRef<Set<string>>(new Set());
 
     const SEARCH_TIMEOUT_MS = 30000;
-    const POLL_INTERVAL_MS = 2000; // poll every 2 seconds (faster)
+    const POLL_INTERVAL_MS = 2000; // poll every 2 seconds
 
     useEffect(() => {
         statusRef.current = status;
     }, [status]);
 
-    // Auto-reset timeout back to idle after 15 seconds
+    // Keep a ref of online users to avoid closure staleness in setInterval
+    const onlineUserIdsRef = useRef<Set<string>>(new Set());
+
+    useEffect(() => {
+        if (onlineUserIds) {
+            onlineUserIdsRef.current = onlineUserIds;
+        }
+    }, [onlineUserIds]);
+
+    // Auto-reset timeout status back to idle after 15 seconds
     useEffect(() => {
         if (status !== "timeout") return;
         const resetTimer = setTimeout(() => {
@@ -182,15 +191,6 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
         channelRef.current = channel;
     }, [user, handleMatchFound]);
 
-    // Keep a ref of online users to avoid closure staleness in setInterval
-    const onlineUserIdsRef = useRef<Set<string>>(new Set());
-
-    useEffect(() => {
-        if (onlineUserIds) {
-            onlineUserIdsRef.current = onlineUserIds;
-        }
-    }, [onlineUserIds]);
-
     /**
      * Poll to detect matches.
      */
@@ -216,6 +216,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     );
 
                     if (newGame && statusRef.current === "searching") {
+                        // Matched by someone else
                         const { data: opponent } = await supabase
                             .from("games_players")
                             .select("player_id")
@@ -236,7 +237,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     }
                 }
 
-                // Strategy 2: Try to actively match with someone in the queue
+                // Strategy 2: Actively match with someone in the queue
                 const { data: waitingPlayer } = await supabase
                     .from("matchmaking_queue")
                     .select("*")
@@ -246,18 +247,24 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     .maybeSingle();
 
                 if (waitingPlayer && statusRef.current === "searching") {
-                    // Check if opponent is actually online using the REF
                     const currentOnlineIds = onlineUserIdsRef.current;
                     const isPresenceActive = currentOnlineIds.size > 0 && currentOnlineIds.has(user.id);
 
-                    if (isPresenceActive && !currentOnlineIds.has(waitingPlayer.player_id)) {
-                        // Opponent is offline -> remove stale entry
+                    if (!isPresenceActive) {
+                        // Presence not ready yet -> DO NOT MATCH. Wait for next poll.
+                        return;
+                    }
+
+                    if (!currentOnlineIds.has(waitingPlayer.player_id)) {
+                        // Presence READY and opponent NOT in list -> Stale entry. Delete.
                         await supabase
                             .from("matchmaking_queue")
                             .delete()
                             .eq("id", waitingPlayer.id);
                         return;
                     }
+
+                    // Presence READY and opponent in list -> Valid match!
 
                     // Remove opponent from queue
                     await supabase
@@ -283,7 +290,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     );
                 }
             } catch {
-                // Silently ignore
+                // Ignore errors
             }
         }, POLL_INTERVAL_MS);
     }, [user, handleMatchFound]);
@@ -303,7 +310,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
         setMatchedOpponent(null);
 
         try {
-            // Snapshot existing game IDs BEFORE we start searching
+            // Snapshot existing games
             const { data: existingGames } = await supabase
                 .from("games_players")
                 .select("game_id")
@@ -319,7 +326,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                 .delete()
                 .eq("player_id", user.id);
 
-            // Check for a waiting opponent (FIFO)
+            // Check for waiting opponent
             const { data: waitingPlayer, error: queryError } = await supabase
                 .from("matchmaking_queue")
                 .select("*")
@@ -330,58 +337,29 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
 
             if (queryError) throw new Error(queryError.message);
 
-            if (waitingPlayer) {
-                // Check if opponent is actually online - BUT only if presence is confirmed working
-                const isPresenceActive = onlineUserIds && onlineUserIds.has(user.id);
+            // Check presence strictly before immediate match
+            const isPresenceActive = onlineUserIds && onlineUserIds.has(user.id);
+            const isOpponentOnline = waitingPlayer && onlineUserIds && onlineUserIds.has(waitingPlayer.player_id);
 
-                if (isPresenceActive && !onlineUserIds.has(waitingPlayer.player_id)) {
-                    // Opponent is offline -> remove stale entry
-                    await supabase
-                        .from("matchmaking_queue")
-                        .delete()
-                        .eq("id", waitingPlayer.id);
+            // If we found a player AND presence system is ready AND player is online -> MATCH IMMEDIATELY
+            if (waitingPlayer && isPresenceActive && isOpponentOnline) {
+                await supabase
+                    .from("matchmaking_queue")
+                    .delete()
+                    .eq("id", waitingPlayer.id);
 
-                    // Proceed to join queue as if no one was waiting
-                    const { error: insertError } = await supabase
-                        .from("matchmaking_queue")
-                        .insert({ player_id: user.id });
+                const gameId = await createGame(
+                    waitingPlayer.player_id as string,
+                    user.id,
+                    user.id
+                );
 
-                    if (insertError && !insertError.message.includes("duplicate")) {
-                        throw new Error(insertError.message);
-                    }
-
-                    subscribeToMatch();
-                    startPolling();
-
-                    timeoutRef.current = setTimeout(async () => {
-                        if (statusRef.current === "searching") {
-                            cleanup();
-                            try {
-                                await supabase
-                                    .from("matchmaking_queue")
-                                    .delete()
-                                    .eq("player_id", user.id);
-                            } catch { /* ignore */ }
-                            setStatus("timeout");
-                        }
-                    }, SEARCH_TIMEOUT_MS);
-                } else {
-                    // Match found immediately
-                    await supabase
-                        .from("matchmaking_queue")
-                        .delete()
-                        .eq("id", waitingPlayer.id);
-
-                    const gameId = await createGame(
-                        waitingPlayer.player_id as string,
-                        user.id,
-                        user.id
-                    );
-
-                    await handleMatchFound(gameId, waitingPlayer.player_id as string);
-                }
+                await handleMatchFound(gameId, waitingPlayer.player_id as string);
             } else {
-                // Join queue and wait
+                // Otherwise (no player OR presence not ready OR player offline) -> Join queue & let polling handle it
+
+                // Note: If player was offline, polling will delete them later when presence is confirmed ready.
+
                 const { error: insertError } = await supabase
                     .from("matchmaking_queue")
                     .insert({ player_id: user.id });
@@ -390,11 +368,9 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     throw new Error(insertError.message);
                 }
 
-                // Subscribe to realtime + start polling
                 subscribeToMatch();
                 startPolling();
 
-                // Timeout
                 timeoutRef.current = setTimeout(async () => {
                     if (statusRef.current === "searching") {
                         cleanup();
@@ -409,15 +385,14 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                 }, SEARCH_TIMEOUT_MS);
             }
         } catch (err) {
-            const message =
-                err instanceof Error ? err.message : "Matchmaking failed";
+            const message = err instanceof Error ? err.message : "Matchmaking failed";
             setError(message);
             setStatus("error");
         }
-    }, [user, subscribeToMatch, startPolling, handleMatchFound, cleanup]);
+    }, [user, onlineUserIds, subscribeToMatch, startPolling, handleMatchFound, cleanup]);
 
     /**
-     * Leave the queue / cancel search.
+     * Leave queue.
      */
     const leaveQueue = useCallback(async () => {
         if (!user) return;
