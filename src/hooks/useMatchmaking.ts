@@ -253,15 +253,16 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                 }
 
                 // Strategy 2: Actively match with someone in the queue
-                const { data: waitingPlayer } = await supabase
+                // Fetch up to 10 oldest players to find one that is online
+                // (We cannot delete offline players due to RLS, so we must skip them in memory)
+                const { data: waitingPlayers } = await supabase
                     .from("matchmaking_queue")
                     .select("*")
                     .neq("player_id", user.id)
                     .order("joined_at", { ascending: true })
-                    .limit(1)
-                    .maybeSingle();
+                    .limit(10);
 
-                if (waitingPlayer && statusRef.current === "searching") {
+                if (waitingPlayers && waitingPlayers.length > 0 && statusRef.current === "searching") {
                     const currentOnlineIds = onlineUserIdsRef.current;
                     const isPresenceActive = currentOnlineIds.size > 0 && currentOnlineIds.has(user.id);
 
@@ -270,39 +271,40 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                         return;
                     }
 
-                    if (!currentOnlineIds.has(waitingPlayer.player_id)) {
-                        // Presence READY and opponent NOT in list -> Stale entry. Delete.
+                    // Find first online opponent
+                    const opponent = waitingPlayers.find(p => currentOnlineIds.has(p.player_id));
+
+                    if (opponent) {
+                        // Found an online opponent! Match!
                         await supabase
                             .from("matchmaking_queue")
                             .delete()
-                            .eq("id", waitingPlayer.id);
-                        return;
+                            .eq("id", opponent.id)
+                            .then(({ error }) => {
+                                // Note: This delete might fail if RLS restriction exists,
+                                // but we proceed to create game anyway.
+                                // Ideally RLS should allow matching trigger deletion or we rely on them deleting themselves.
+                                if (error) console.log("Could not delete opponent from queue logic (expected if strict RLS)", error);
+                            });
+
+                        // Remove ourselves from queue
+                        await supabase
+                            .from("matchmaking_queue")
+                            .delete()
+                            .eq("player_id", user.id);
+
+                        const gameId = await createGame(
+                            opponent.player_id as string,
+                            user.id,
+                            user.id
+                        );
+
+                        await handleMatchFound(
+                            gameId,
+                            opponent.player_id as string
+                        );
                     }
-
-                    // Presence READY and opponent in list -> Valid match!
-
-                    // Remove opponent from queue
-                    await supabase
-                        .from("matchmaking_queue")
-                        .delete()
-                        .eq("id", waitingPlayer.id);
-
-                    // Remove ourselves from queue
-                    await supabase
-                        .from("matchmaking_queue")
-                        .delete()
-                        .eq("player_id", user.id);
-
-                    const gameId = await createGame(
-                        waitingPlayer.player_id as string,
-                        user.id,
-                        user.id
-                    );
-
-                    await handleMatchFound(
-                        gameId,
-                        waitingPlayer.player_id as string
-                    );
+                    // If no one in top 10 is online, we do nothing and retry next poll
                 }
             } catch {
                 // Ignore errors
@@ -341,35 +343,38 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                 .delete()
                 .eq("player_id", user.id);
 
-            // Check for waiting opponent
-            const { data: waitingPlayer, error: queryError } = await supabase
+            // Check for waiting opponent - fetch batch to skip offline users
+            const { data: waitingPlayers, error: queryError } = await supabase
                 .from("matchmaking_queue")
                 .select("*")
                 .neq("player_id", user.id)
                 .order("joined_at", { ascending: true })
-                .limit(1)
-                .maybeSingle();
+                .limit(10);
 
             if (queryError) throw new Error(queryError.message);
 
             // Check presence strictly before immediate match
             const isPresenceActive = onlineUserIds && onlineUserIds.has(user.id);
-            const isOpponentOnline = waitingPlayer && onlineUserIds && onlineUserIds.has(waitingPlayer.player_id);
 
-            // If we found a player AND presence system is ready AND player is online -> MATCH IMMEDIATELY
-            if (waitingPlayer && isPresenceActive && isOpponentOnline) {
+            // Find first online opponent
+            const opponent = isPresenceActive
+                ? waitingPlayers?.find(p => onlineUserIds.has(p.player_id))
+                : null;
+
+            // If we found a player AND presence system is ready -> MATCH IMMEDIATELY
+            if (opponent) {
                 await supabase
                     .from("matchmaking_queue")
                     .delete()
-                    .eq("id", waitingPlayer.id);
+                    .eq("id", opponent.id);
 
                 const gameId = await createGame(
-                    waitingPlayer.player_id as string,
+                    opponent.player_id as string,
                     user.id,
                     user.id
                 );
 
-                await handleMatchFound(gameId, waitingPlayer.player_id as string);
+                await handleMatchFound(gameId, opponent.player_id as string);
             } else {
                 // Otherwise (no player OR presence not ready OR player offline) -> Join queue & let polling handle it
 
