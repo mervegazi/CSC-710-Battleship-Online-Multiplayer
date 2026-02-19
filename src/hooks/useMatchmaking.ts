@@ -211,29 +211,44 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
                     .eq("player_id", user.id);
 
                 if (myGames) {
+                    const now = new Date();
+                    const oneMinuteAgo = new Date(now.getTime() - 60000).toISOString();
+
+                    // Find a game ID that didn't exist before we started searching
                     const newGame = myGames.find(
                         (g) => !existingGameIdsRef.current.has(g.game_id)
                     );
 
                     if (newGame && statusRef.current === "searching") {
-                        // Matched by someone else
-                        const { data: opponent } = await supabase
-                            .from("games_players")
-                            .select("player_id")
-                            .eq("game_id", newGame.game_id)
-                            .neq("player_id", user.id)
+                        // Verify the game is actually recent (prevent matching into stale games)
+                        const { data: gameDetails } = await supabase
+                            .from("games")
+                            .select("created_at")
+                            .eq("id", newGame.game_id)
                             .maybeSingle();
 
-                        await supabase
-                            .from("matchmaking_queue")
-                            .delete()
-                            .eq("player_id", user.id);
+                        if (gameDetails && gameDetails.created_at > oneMinuteAgo) {
+                            const { data: opponent } = await supabase
+                                .from("games_players")
+                                .select("player_id")
+                                .eq("game_id", newGame.game_id)
+                                .neq("player_id", user.id)
+                                .maybeSingle();
 
-                        await handleMatchFound(
-                            newGame.game_id,
-                            opponent?.player_id ?? ""
-                        );
-                        return;
+                            await supabase
+                                .from("matchmaking_queue")
+                                .delete()
+                                .eq("player_id", user.id);
+
+                            await handleMatchFound(
+                                newGame.game_id,
+                                opponent?.player_id ?? ""
+                            );
+                            return;
+                        } else {
+                            // It's an old game we just discovered? Ignore it.
+                            existingGameIdsRef.current.add(newGame.game_id);
+                        }
                     }
                 }
 
