@@ -125,16 +125,8 @@ export function useChat(channel = "lobby"): UseChatReturn {
 
         channelRef.current = realtimeChannel;
 
-        // 3. Polling Fallback (every 3s)
-        const interval = setInterval(() => {
-            if (!cancelled) {
-                loadMessages(false);
-            }
-        }, 3000);
-
         return () => {
             cancelled = true;
-            clearInterval(interval);
             if (channelRef.current) {
                 supabase.removeChannel(channelRef.current);
                 channelRef.current = null;
