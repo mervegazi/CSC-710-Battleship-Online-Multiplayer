@@ -91,7 +91,7 @@ export function useMatchmaking(onlineUserIds?: Set<string>): UseMatchmakingRetur
         statusRef.current = status;
     }, [status]);
 
-    // Keep a ref of online users to avoid closure staleness in setInterval
+    // Keep a ref of online users to avoid closure staleness in async callbacks
     const onlineUserIdsRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {

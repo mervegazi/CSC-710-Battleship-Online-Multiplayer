@@ -15,6 +15,9 @@ interface UseChatReturn {
 const MAX_MESSAGE_LENGTH = 500;
 const INITIAL_LOAD_COUNT = 50;
 
+// Prefix for optimistic message IDs so we can identify them reliably
+const OPTIMISTIC_PREFIX = "optimistic-";
+
 export function useChat(channel = "lobby"): UseChatReturn {
     const { user, profile } = useAuth();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -30,8 +33,7 @@ export function useChat(channel = "lobby"): UseChatReturn {
         "Player";
 
     /**
-     * Fetch messages from DB. Handles both initial load and polling updates.
-     * Silent update by default (loading=false), but can trigger loading state if needed.
+     * Fetch messages from DB for the initial load or to revert a failed optimistic update.
      */
     const loadMessages = useCallback(async (isInitial = false) => {
         if (isInitial) setLoading(true);
@@ -110,8 +112,24 @@ export function useChat(channel = "lobby"): UseChatReturn {
                         if (newMsg.channel !== channel) return;
 
                         setMessages((prev) => {
-                            // Avoid duplicates
+                            // Avoid exact-ID duplicates (e.g. duplicate Realtime events)
                             if (prev.some((m) => m.id === newMsg.id)) return prev;
+
+                            // Replace a matching optimistic message (same sender + content)
+                            // that was added before the DB-generated ID was known.
+                            const optimisticIdx = prev.findIndex(
+                                (m) =>
+                                    m.id.startsWith(OPTIMISTIC_PREFIX) &&
+                                    m.sender_id === newMsg.sender_id &&
+                                    m.message === newMsg.message &&
+                                    m.channel === newMsg.channel
+                            );
+                            if (optimisticIdx !== -1) {
+                                const next = [...prev];
+                                next[optimisticIdx] = newMsg;
+                                return next;
+                            }
+
                             return [...prev, newMsg];
                         });
                     }
@@ -151,9 +169,10 @@ export function useChat(channel = "lobby"): UseChatReturn {
                 );
             }
 
-            // Optimistic update
+            // Optimistic update — use a prefixed ID so the Realtime handler
+            // can identify and replace this placeholder with the real DB record.
             const optimisticMsg: ChatMessage = {
-                id: crypto.randomUUID(),
+                id: `${OPTIMISTIC_PREFIX}${crypto.randomUUID()}`,
                 sender_id: user.id,
                 sender_name: displayName,
                 message: text.trim(),
