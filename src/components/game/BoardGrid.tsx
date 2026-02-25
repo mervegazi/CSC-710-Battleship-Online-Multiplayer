@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { CellState } from "../../types";
 import { BoardCell } from "./BoardCell";
 
@@ -56,12 +57,9 @@ export function BoardGrid({
 
                     {/* ──── Rows ──── */}
                     {ROW_LABELS.map((rowLabel, rowIdx) => (
-                        <>
+                        <Fragment key={`row-${rowIdx}`}>
                             {/* Row header */}
-                            <div
-                                key={`row-${rowLabel}`}
-                                className="flex items-center justify-center text-[10px] sm:text-xs font-bold text-blue-400 aspect-square"
-                            >
+                            <div className="flex items-center justify-center text-[10px] sm:text-xs font-bold text-blue-400 aspect-square">
                                 {rowLabel}
                             </div>
 
@@ -79,10 +77,11 @@ export function BoardGrid({
                                     disabled={!interactive}
                                 />
                             ))}
-                        </>
+                        </Fragment>
                     ))}
                 </div>
             </div>
         </div>
     );
 }
+
