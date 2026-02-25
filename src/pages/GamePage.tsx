@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import { BoardGrid } from "../components/game/BoardGrid";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../hooks/useAuth";
 import type { CellState } from "../types";
 
 /** Build a blank 10×10 board */
@@ -13,18 +15,11 @@ function emptyBoard(): CellState[][] {
 /** Demo board — showcases every cell state */
 function demoMyBoard(): CellState[][] {
   const b = emptyBoard();
-  // Carrier (5 cells, row 1)
   for (let c = 2; c <= 6; c++) b[0][c] = "ship";
-  // Battleship (4 cells, row 3)
   for (let c = 0; c <= 3; c++) b[2][c] = "ship";
-  // A hit on my ship
   b[2][1] = "hit";
-  // Destroyer (2 cells, col J)
-  b[7][9] = "ship";
-  b[8][9] = "ship";
-  b[8][9] = "sunk"; // mark as sunk
   b[7][9] = "sunk";
-  // Some misses the opponent made
+  b[8][9] = "sunk";
   b[4][4] = "miss";
   b[5][6] = "miss";
   return b;
@@ -40,18 +35,74 @@ function demoOpponentBoard(): CellState[][] {
   return b;
 }
 
+interface PlayerInfo {
+  id: string;
+  displayName: string;
+}
+
 export function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
+  const { user } = useAuth();
 
   const [myBoard] = useState<CellState[][]>(demoMyBoard);
   const [opponentBoard, setOpponentBoard] =
     useState<CellState[][]>(demoOpponentBoard);
 
+  const [myInfo, setMyInfo] = useState<PlayerInfo | null>(null);
+  const [opponentInfo, setOpponentInfo] = useState<PlayerInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch both players' names from Supabase
+  useEffect(() => {
+    if (!gameId || !user) return;
+
+    async function fetchPlayers() {
+      try {
+        const { data: players } = await supabase
+          .from("games_players")
+          .select("player_id")
+          .eq("game_id", gameId);
+
+        if (!players || players.length === 0) {
+          setLoading(false);
+          return;
+        }
+
+        const playerIds = players.map((p) => p.player_id);
+
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, display_name")
+          .in("id", playerIds);
+
+        if (profiles) {
+          for (const profile of profiles) {
+            const info: PlayerInfo = {
+              id: profile.id,
+              displayName: profile.display_name ?? "Unknown",
+            };
+            if (profile.id === user!.id) {
+              setMyInfo(info);
+            } else {
+              setOpponentInfo(info);
+            }
+          }
+        }
+      } catch {
+        // Silently fail — header will show fallback
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchPlayers();
+  }, [gameId, user]);
+
   const handleOpponentCellClick = (row: number, col: number) => {
     setOpponentBoard((prev) => {
       const next = prev.map((r) => [...r]);
       if (next[row][col] === "empty") {
-        next[row][col] = "miss"; // demo: mark as miss
+        next[row][col] = "miss";
       }
       return next;
     });
@@ -62,7 +113,17 @@ export function GamePage() {
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <h1 className="text-xl sm:text-2xl font-bold">Game #{gameId}</h1>
+          <h1 className="text-lg sm:text-2xl font-bold flex items-center gap-2">
+            {loading ? (
+              <span className="inline-block h-6 w-48 animate-pulse rounded bg-slate-800" />
+            ) : (
+              <>
+                <span className="text-blue-400">{myInfo?.displayName ?? "You"}</span>
+                <span className="text-slate-500">⚔️</span>
+                <span className="text-red-400">{opponentInfo?.displayName ?? "Opponent"}</span>
+              </>
+            )}
+          </h1>
           <Link
             to="/lobby"
             className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
@@ -76,12 +137,12 @@ export function GamePage() {
           <BoardGrid
             cells={myBoard}
             interactive={false}
-            title="Your Fleet"
+            title={myInfo?.displayName ?? "Your Fleet"}
           />
           <BoardGrid
             cells={opponentBoard}
             onCellClick={handleOpponentCellClick}
-            title="Opponent's Waters"
+            title={opponentInfo?.displayName ?? "Opponent's Waters"}
           />
         </div>
 
