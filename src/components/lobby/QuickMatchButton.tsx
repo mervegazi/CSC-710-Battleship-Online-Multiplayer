@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { Button } from "../common/Button";
 import { Modal } from "../common/Modal";
 import { useMatchmaking } from "../../hooks/useMatchmaking";
@@ -9,16 +10,37 @@ interface QuickMatchButtonProps {
 }
 
 export function QuickMatchButton({ onStatusChange, onlineUserIds }: QuickMatchButtonProps) {
+  const navigate = useNavigate();
   const { status, error, matchedGameId, matchedOpponent, joinQueue, leaveQueue } =
     useMatchmaking(onlineUserIds);
   const [showMatchModal, setShowMatchModal] = useState(false);
+  const [countdown, setCountdown] = useState(5);
 
   // Show modal when matched
   useEffect(() => {
     if (status === "matched") {
       setShowMatchModal(true);
+      setCountdown(5);
     }
   }, [status]);
+
+  // Auto-navigate countdown when matched
+  useEffect(() => {
+    if (!showMatchModal || !matchedGameId) return;
+
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          navigate(`/game/${matchedGameId}`);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [showMatchModal, matchedGameId, navigate]);
 
   // Notify parent of status changes (e.g. for lobby presence updates)
   useEffect(() => {
@@ -32,6 +54,12 @@ export function QuickMatchButton({ onStatusChange, onlineUserIds }: QuickMatchBu
       setShowMatchModal(true);
     } else {
       await joinQueue();
+    }
+  };
+
+  const handleJoinBattle = () => {
+    if (matchedGameId) {
+      navigate(`/game/${matchedGameId}`);
     }
   };
 
@@ -134,18 +162,14 @@ export function QuickMatchButton({ onStatusChange, onlineUserIds }: QuickMatchBu
             </div>
           )}
 
-          {/* Coming soon notice */}
-          <div className="w-full rounded-lg border border-amber-500/30 bg-amber-950/20 px-4 py-3 text-center">
-            <p className="text-sm font-semibold text-amber-300">
-              🚧 Game Board — Coming Soon
-            </p>
-            <p className="mt-1 text-xs text-amber-400/60">
-              Ship placement & battle phases are under development.
-            </p>
-            <p className="mt-0.5 text-xs text-amber-400/60">
-              Stay tuned, Captain!
-            </p>
-          </div>
+          {/* Join Battle button */}
+          <Button
+            fullWidth
+            onClick={handleJoinBattle}
+            className="bg-emerald-600 text-white hover:bg-emerald-500"
+          >
+            ⚔️ Join Battle ({countdown}s)
+          </Button>
 
           <Button
             fullWidth
