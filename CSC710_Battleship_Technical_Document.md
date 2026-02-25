@@ -68,8 +68,8 @@ A real-time, browser-based multiplayer Battleship game where players can join a 
 | Carrier | 5 |
 | Battleship | 4 |
 | Cruiser | 3 |
-| Submarine | 3 |
-| Destroyer | 2 |
+| Submarine | 2 |
+| Destroyer | 1 |
 
 - Ships can be placed horizontally or vertically, but cannot overlap or go out of bounds.
 - Players alternate turns, each selecting one cell on the opponent's grid.
@@ -381,8 +381,8 @@ flowchart TD
 │   A B C D E F G H I J       │   ☐ Carrier (5)       │
 │ 1 . . . . . . . . . .       │   ☐ Battleship (4)    │
 │ 2 . . . . . . . . . .       │   ☐ Cruiser (3)       │
-│ 3 . . . . . . . . . .       │   ☐ Submarine (3)     │
-│ 4 . . . . . . . . . .       │   ☐ Destroyer (2)     │
+│ 3 . . . . . . . . . .       │   ☐ Submarine (2)     │
+│ 4 . . . . . . . . . .       │   ☐ Destroyer (1)     │
 │ 5 . . . . . . . . . .       │                       │
 │ 6 . . . . . . . . . .       │   [Rotate Ship]       │
 │ 7 . . . . . . . . . .       │   [Random Place]      │
@@ -1169,8 +1169,8 @@ const SHIP_SIZES: Record<string, number> = {
   carrier: 5,
   battleship: 4,
   cruiser: 3,
-  submarine: 3,
-  destroyer: 2,
+  submarine: 2,
+  destroyer: 1,
 };
 
 function validatePlacement(ships: Ship[]): boolean {

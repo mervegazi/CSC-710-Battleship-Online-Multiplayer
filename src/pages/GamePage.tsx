@@ -1,55 +1,27 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, Link } from "react-router";
 import { BoardGrid } from "../components/game/BoardGrid";
-import { supabase } from "../lib/supabase";
+import { TurnIndicator } from "../components/game/TurnIndicator";
+import { GameEndModal } from "../components/game/GameEndModal";
 import { useAuth } from "../hooks/useAuth";
-import type { CellState, Orientation } from "../types";
+import { useGame } from "../hooks/useGame";
+import type { Orientation } from "../types";
 import {
   MAX_SHIP_COUNT,
   MIN_SHIP_COUNT,
   areCellsInBounds,
   createFleetState,
   getShipCells,
-  hasOverlap
+  getShipName,
+  hasOverlap,
 } from "../game/shipRules";
-
-function emptyBoard(): CellState[][] {
-  return Array.from({ length: 10 }, () =>
-    Array.from<CellState>({ length: 10 }).fill("empty")
-  );
-}
-
-function boardFromFleet(
-  fleet: ReturnType<typeof createFleetState>
-): CellState[][] {
-  const board = emptyBoard();
-  for (const ship of fleet) {
-    for (const cell of ship.cells) {
-      board[cell.y][cell.x] = "ship";
-    }
-  }
-  return board;
-}
-
-function demoOpponentBoard(): CellState[][] {
-  const b = emptyBoard();
-  b[1][3] = "hit";
-  b[1][4] = "hit";
-  b[3][7] = "miss";
-  b[6][2] = "miss";
-  b[9][0] = "hit";
-  return b;
-}
-
-interface PlayerInfo {
-  id: string;
-  displayName: string;
-}
+import { boardFromFleet } from "../lib/gameLogic";
 
 export function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const { user } = useAuth();
 
+  // ── Ship placement state ────────────────────────────────────────────
   const [shipCount, setShipCount] = useState<number>(5);
   const [fleet, setFleet] = useState(() => createFleetState(5));
   const [selectedShipId, setSelectedShipId] = useState<string>("ship-1");
@@ -57,68 +29,39 @@ export function GamePage() {
   const [orientation, setOrientation] = useState<Orientation>("horizontal");
   const [placementError, setPlacementError] = useState<string | null>(null);
   const [previewMap, setPreviewMap] = useState<Record<string, "valid" | "invalid">>({});
+  const [submittingReady, setSubmittingReady] = useState(false);
 
-  const [myBoard, setMyBoard] = useState<CellState[][]>(() =>
-    boardFromFleet(createFleetState(5))
-  );
-  const [opponentBoard, setOpponentBoard] =
-    useState<CellState[][]>(demoOpponentBoard);
+  // ── Game hook ───────────────────────────────────────────────────────
+  const {
+    gameStatus,
+    isMyTurn,
+    myBoard: gameBoardMy,
+    opponentBoard: gameBoardOpp,
+    myInfo,
+    opponentInfo,
+    myPlayer,
+    winnerId,
+    loading,
+    error,
+    submitReady,
+    attack,
+  } = useGame(gameId);
 
-  const [myInfo, setMyInfo] = useState<PlayerInfo | null>(null);
-  const [opponentInfo, setOpponentInfo] = useState<PlayerInfo | null>(null);
-  const [loading, setLoading] = useState(true);
+  // During setup, show the fleet placement board. After ready, show game boards.
+  const isSetup = gameStatus === "setup";
+  const isPlaying = gameStatus === "in_progress";
+  const isFinished = gameStatus === "finished" || gameStatus === "abandoned";
+  const allShipsPlaced = fleet.every((s) => s.cells.length > 0);
+  const isReady = myPlayer?.ready ?? false;
 
-  useEffect(() => {
-    if (!gameId || !user) return;
-    const currentUserId = user.id;
+  // Board to display for "my" side
+  const myDisplayBoard = isSetup && !isReady ? boardFromFleet(fleet) : gameBoardMy;
 
-    async function fetchPlayers() {
-      try {
-        const { data: players } = await supabase
-          .from("games_players")
-          .select("player_id")
-          .eq("game_id", gameId);
-
-        if (!players || players.length === 0) {
-          setLoading(false);
-          return;
-        }
-
-        const playerIds = players.map((p) => p.player_id);
-
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("id, display_name")
-          .in("id", playerIds);
-
-        if (profiles) {
-          for (const profile of profiles) {
-            const info: PlayerInfo = {
-              id: profile.id,
-              displayName: profile.display_name ?? "Unknown"
-            };
-            if (profile.id === currentUserId) {
-              setMyInfo(info);
-            } else {
-              setOpponentInfo(info);
-            }
-          }
-        }
-      } catch {
-        // Header falls back to default labels.
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchPlayers();
-  }, [gameId, user]);
-
+  // ── Ship placement handlers ─────────────────────────────────────────
   const handleShipCountChange = (nextShipCount: number) => {
     const nextFleet = createFleetState(nextShipCount);
     setShipCount(nextShipCount);
     setFleet(nextFleet);
-    setMyBoard(boardFromFleet(nextFleet));
     setSelectedShipId("ship-1");
     setDraggedShipId(null);
     setPreviewMap({});
@@ -158,7 +101,6 @@ export function GamePage() {
           ? { ...ship, orientation, cells: candidateCells }
           : ship
       );
-      setMyBoard(boardFromFleet(nextFleet));
 
       const nextUnplaced = nextFleet.find((ship) => ship.cells.length === 0);
       setSelectedShipId(nextUnplaced?.id ?? shipId);
@@ -169,10 +111,13 @@ export function GamePage() {
   };
 
   const handleMyBoardCellClick = (row: number, col: number) => {
-    placeShipAt(selectedShipId, row, col);
+    if (isSetup && !isReady) {
+      placeShipAt(selectedShipId, row, col);
+    }
   };
 
   const handleMyBoardCellDrop = (row: number, col: number) => {
+    if (!isSetup || isReady) return;
     const shipId = draggedShipId ?? selectedShipId;
     placeShipAt(shipId, row, col);
     setDraggedShipId(null);
@@ -180,10 +125,10 @@ export function GamePage() {
   };
 
   const handleMyBoardCellDragStart = (row: number, col: number) => {
+    if (!isSetup || isReady) return;
     const shipAtCell = fleet.find((ship) =>
       ship.cells.some((cell) => cell.y === row && cell.x === col)
     );
-
     if (!shipAtCell) return;
     setSelectedShipId(shipAtCell.id);
     setDraggedShipId(shipAtCell.id);
@@ -196,6 +141,7 @@ export function GamePage() {
   };
 
   const handleMyBoardCellDragOver = (row: number, col: number) => {
+    if (!isSetup || isReady) return;
     const shipId = draggedShipId ?? selectedShipId;
     const selectedShip = fleet.find((ship) => ship.id === shipId);
     if (!selectedShip) return;
@@ -214,19 +160,30 @@ export function GamePage() {
     setPreviewMap(nextPreview);
   };
 
-  const handleOpponentCellClick = (row: number, col: number) => {
-    setOpponentBoard((prev) => {
-      const next = prev.map((r) => [...r]);
-      if (next[row][col] === "empty") {
-        next[row][col] = "miss";
-      }
-      return next;
-    });
+  // ── Ready button ────────────────────────────────────────────────────
+  const handleReady = async () => {
+    if (!allShipsPlaced || submittingReady) return;
+    setSubmittingReady(true);
+    try {
+      await submitReady(fleet);
+    } catch {
+      setPlacementError("Failed to submit board. Please try again.");
+    } finally {
+      setSubmittingReady(false);
+    }
   };
 
+  // ── Attack handler ──────────────────────────────────────────────────
+  const handleOpponentCellClick = (row: number, col: number) => {
+    if (!isMyTurn) return;
+    attack(row, col);
+  };
+
+  // ── Render ──────────────────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
+        {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-lg sm:text-2xl font-bold flex items-center gap-2">
             {loading ? (
@@ -247,137 +204,161 @@ export function GamePage() {
           </Link>
         </div>
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
-            Ship Placement
-          </h2>
-          <p className="mt-2 text-xs text-slate-400">
-            Drag a ship onto your board (or click a ship then click a cell).
-            Choose orientation before placement.
-            Ships must stay inside the 10x10 grid and cannot overlap.
+        {/* Error banner */}
+        {error && (
+          <p className="rounded border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+            {error}
           </p>
+        )}
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {fleet.map((ship) => {
-              const isPlaced = ship.cells.length > 0;
-              const isSelected = selectedShipId === ship.id;
-              return (
-                <button
-                  key={ship.id}
-                  type="button"
-                  draggable
-                  onDragStart={(event) => {
-                    setSelectedShipId(ship.id);
-                    setDraggedShipId(ship.id);
-                    event.dataTransfer.setData("text/plain", ship.id);
-                    event.dataTransfer.effectAllowed = "move";
-                    setPlacementError(null);
-                  }}
-                  onDragEnd={() => {
-                    setDraggedShipId(null);
-                    setPreviewMap({});
-                  }}
-                  onClick={() => {
-                    setSelectedShipId(ship.id);
-                    setDraggedShipId(null);
-                    setPreviewMap({});
-                    setPlacementError(null);
-                  }}
-                  className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
-                    isSelected
-                      ? "border-blue-400 bg-blue-600/20 text-blue-200"
-                      : "border-slate-700 bg-slate-800 text-slate-200 hover:border-slate-500"
-                  }`}
-                >
-                  {ship.id} (1x{ship.size}) {isPlaced ? "Placed" : "Unplaced"}
-                </button>
-              );
-            })}
+        {/* Turn indicator (only during gameplay) */}
+        {isPlaying && (
+          <TurnIndicator
+            isMyTurn={isMyTurn}
+            opponentName={opponentInfo?.displayName ?? "Opponent"}
+          />
+        )}
+
+        {/* Waiting for opponent ready (setup phase, I'm ready) */}
+        {isSetup && isReady && (
+          <div className="rounded-lg border border-blue-500/40 bg-blue-950/30 px-4 py-3 text-center text-sm text-blue-300">
+            Your fleet is locked in. Waiting for opponent to ready up...
           </div>
+        )}
 
-          <div className="mt-4 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleRotate}
-              className="rounded border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs text-slate-100 hover:border-slate-500"
-            >
-              Rotate: {orientation}
-            </button>
-            <span className="text-xs text-slate-400">Selected: {selectedShipId}</span>
-          </div>
-
-          {placementError && (
-            <p className="mt-3 rounded border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs text-red-300">
-              {placementError}
+        {/* Ship placement UI (setup phase, not yet ready) */}
+        {isSetup && !isReady && (
+          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
+              Ship Placement
+            </h2>
+            <p className="mt-2 text-xs text-slate-400">
+              Drag a ship onto your board (or click a ship then click a cell).
+              Choose orientation before placement.
+              Ships must stay inside the 10x10 grid and cannot overlap.
             </p>
-          )}
-        </section>
 
+            <div className="mt-4 flex flex-wrap gap-2">
+              {fleet.map((ship) => {
+                const isPlaced = ship.cells.length > 0;
+                const isSelected = selectedShipId === ship.id;
+                return (
+                  <button
+                    key={ship.id}
+                    type="button"
+                    draggable
+                    onDragStart={(event) => {
+                      setSelectedShipId(ship.id);
+                      setDraggedShipId(ship.id);
+                      event.dataTransfer.setData("text/plain", ship.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      setPlacementError(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedShipId(null);
+                      setPreviewMap({});
+                    }}
+                    onClick={() => {
+                      setSelectedShipId(ship.id);
+                      setDraggedShipId(null);
+                      setPreviewMap({});
+                      setPlacementError(null);
+                    }}
+                    className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                      isSelected
+                        ? "border-blue-400 bg-blue-600/20 text-blue-200"
+                        : "border-slate-700 bg-slate-800 text-slate-200 hover:border-slate-500"
+                    }`}
+                  >
+                    {getShipName(ship.size)} (1x{ship.size}) {isPlaced ? "Placed" : "Unplaced"}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleRotate}
+                className="rounded border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs text-slate-100 hover:border-slate-500"
+              >
+                Rotate: {orientation}
+              </button>
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                Ships
+                <select
+                  value={shipCount}
+                  onChange={(e) => handleShipCountChange(Number(e.target.value))}
+                  className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-slate-100"
+                >
+                  {Array.from(
+                    { length: MAX_SHIP_COUNT - MIN_SHIP_COUNT + 1 },
+                    (_, i) => i + MIN_SHIP_COUNT
+                  ).map((count) => (
+                    <option key={count} value={count}>
+                      {count}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="text-xs text-slate-400">
+                Selected: {getShipName(fleet.find((s) => s.id === selectedShipId)?.size ?? 1)}
+              </span>
+            </div>
+
+            {placementError && (
+              <p className="mt-3 rounded border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+                {placementError}
+              </p>
+            )}
+
+            {/* Ready button */}
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={handleReady}
+                disabled={!allShipsPlaced || submittingReady}
+                className={`rounded-lg px-6 py-2 text-sm font-semibold transition-colors ${
+                  allShipsPlaced && !submittingReady
+                    ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                    : "bg-slate-700 text-slate-400 cursor-not-allowed"
+                }`}
+              >
+                {submittingReady ? "Submitting..." : allShipsPlaced ? "Ready!" : "Place all ships first"}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Game boards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 place-items-center">
           <BoardGrid
-            cells={myBoard}
-            interactive
+            cells={myDisplayBoard}
+            interactive={isSetup && !isReady}
             onCellClick={handleMyBoardCellClick}
             onCellDrop={handleMyBoardCellDrop}
             onCellDragOver={handleMyBoardCellDragOver}
             onCellDragStart={handleMyBoardCellDragStart}
             onCellDragEnd={handleMyBoardCellDragEnd}
-            previewMap={previewMap}
+            previewMap={isSetup && !isReady ? previewMap : undefined}
             title={myInfo?.displayName ?? "Your Fleet"}
           />
           <BoardGrid
-            cells={opponentBoard}
+            cells={gameBoardOpp}
+            interactive={isMyTurn}
             onCellClick={handleOpponentCellClick}
             title={opponentInfo?.displayName ?? "Opponent's Waters"}
           />
         </div>
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
-              Fleet Rule Validation
-            </h2>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              Ship Count
-              <select
-                value={shipCount}
-                onChange={(e) => handleShipCountChange(Number(e.target.value))}
-                className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-slate-100"
-              >
-                {Array.from(
-                  { length: MAX_SHIP_COUNT - MIN_SHIP_COUNT + 1 },
-                  (_, i) => i + MIN_SHIP_COUNT
-                ).map((count) => (
-                  <option key={count} value={count}>
-                    {count}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <p className="mt-3 text-xs text-slate-400">
-            Rule: selecting N ships creates ships of sizes 1..N.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {fleet.map((ship) => (
-              <span
-                key={ship.id}
-                className="rounded-md border border-blue-500/30 bg-blue-950/30 px-2.5 py-1 text-xs text-blue-300"
-              >
-                {ship.id}: 1x{ship.size}
-              </span>
-            ))}
-          </div>
-        </section>
-
+        {/* Legend */}
         <div className="flex flex-wrap justify-center gap-4 text-[10px] sm:text-xs text-slate-400">
           {[
             { color: "bg-slate-800", label: "Empty" },
             { color: "bg-blue-600", label: "Ship" },
             { color: "bg-red-600", label: "Hit" },
             { color: "bg-slate-700", label: "Miss" },
-            { color: "bg-red-900", label: "Sunk" }
+            { color: "bg-red-900", label: "Sunk" },
           ].map(({ color, label }) => (
             <span key={label} className="flex items-center gap-1.5">
               <span className={`inline-block h-3 w-3 rounded-sm ${color}`} />
@@ -385,6 +366,15 @@ export function GamePage() {
             </span>
           ))}
         </div>
+
+        {/* Game end modal */}
+        {isFinished && user && (
+          <GameEndModal
+            isOpen
+            isWinner={winnerId === user.id}
+            opponentName={opponentInfo?.displayName ?? "Opponent"}
+          />
+        )}
       </div>
     </main>
   );
