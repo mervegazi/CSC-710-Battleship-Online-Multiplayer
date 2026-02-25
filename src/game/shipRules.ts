@@ -1,7 +1,8 @@
-import type { Coordinate } from "../types";
+import type { Coordinate, Orientation } from "../types";
 
 export const MIN_SHIP_COUNT = 1;
 export const MAX_SHIP_COUNT = 5;
+export const BOARD_SIZE = 10;
 
 export interface MatchShip {
   id: string;
@@ -35,4 +36,40 @@ export function createFleetState(shipCount: number): MatchShip[] {
     sunk: false,
     cells: []
   }));
+}
+
+export function getShipCells(
+  startRow: number,
+  startCol: number,
+  size: number,
+  orientation: Orientation
+): Coordinate[] {
+  return Array.from({ length: size }, (_, offset) => ({
+    x: orientation === "horizontal" ? startCol + offset : startCol,
+    y: orientation === "vertical" ? startRow + offset : startRow
+  }));
+}
+
+export function areCellsInBounds(cells: Coordinate[]): boolean {
+  return cells.every(
+    (cell) =>
+      cell.x >= 0 &&
+      cell.x < BOARD_SIZE &&
+      cell.y >= 0 &&
+      cell.y < BOARD_SIZE
+  );
+}
+
+export function hasOverlap(
+  ships: MatchShip[],
+  nextCells: Coordinate[],
+  excludeShipId?: string
+): boolean {
+  const occupied = new Set(
+    ships
+      .filter((ship) => ship.id !== excludeShipId)
+      .flatMap((ship) => ship.cells.map((cell) => `${cell.x},${cell.y}`))
+  );
+
+  return nextCells.some((cell) => occupied.has(`${cell.x},${cell.y}`));
 }

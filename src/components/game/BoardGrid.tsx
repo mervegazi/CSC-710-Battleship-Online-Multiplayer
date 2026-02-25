@@ -10,6 +10,11 @@ interface BoardGridProps {
     cells: CellState[][];
     /** Fired when a cell is clicked; (row, col) are 0-indexed */
     onCellClick?: (row: number, col: number) => void;
+    onCellDrop?: (row: number, col: number) => void;
+    onCellDragOver?: (row: number, col: number) => void;
+    onCellDragStart?: (row: number, col: number) => void;
+    onCellDragEnd?: () => void;
+    previewMap?: Record<string, "valid" | "invalid">;
     /** When false the grid is view-only (no hover / click) */
     interactive?: boolean;
     /** Optional heading rendered above the grid */
@@ -19,6 +24,11 @@ interface BoardGridProps {
 export function BoardGrid({
     cells,
     onCellClick,
+    onCellDrop,
+    onCellDragOver,
+    onCellDragStart,
+    onCellDragEnd,
+    previewMap,
     interactive = true,
     title,
 }: BoardGridProps) {
@@ -64,19 +74,37 @@ export function BoardGrid({
                             </div>
 
                             {/* Data cells */}
-                            {COL_LABELS.map((colLabel, colIdx) => (
-                                <BoardCell
+                            {COL_LABELS.map((colLabel, colIdx) => {
+                                const cellState = cells[rowIdx][colIdx];
+                                return <BoardCell
                                     key={`${rowIdx}-${colIdx}`}
-                                    state={cells[rowIdx][colIdx]}
+                                    state={cellState}
                                     label={`${colLabel}${rowLabel}`}
                                     onClick={
                                         interactive && onCellClick
                                             ? () => onCellClick(rowIdx, colIdx)
                                             : undefined
                                     }
+                                    onDrop={
+                                        interactive && onCellDrop
+                                            ? () => onCellDrop(rowIdx, colIdx)
+                                            : undefined
+                                    }
+                                    onDragOver={
+                                        interactive && onCellDragOver
+                                            ? () => onCellDragOver(rowIdx, colIdx)
+                                            : undefined
+                                    }
+                                    onDragStart={
+                                        interactive && onCellDragStart && cellState === "ship"
+                                            ? () => onCellDragStart(rowIdx, colIdx)
+                                            : undefined
+                                    }
+                                    onDragEnd={interactive ? onCellDragEnd : undefined}
+                                    previewStatus={previewMap?.[`${rowIdx},${colIdx}`]}
                                     disabled={!interactive}
-                                />
-                            ))}
+                                />;
+                            })}
                         </Fragment>
                     ))}
                 </div>
