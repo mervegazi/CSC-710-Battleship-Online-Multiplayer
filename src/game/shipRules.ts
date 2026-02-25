@@ -1,15 +1,41 @@
-import type { Coordinate, Orientation } from "../types";
+import type { Coordinate, Orientation, ShipType } from "../types";
 
 export const MIN_SHIP_COUNT = 1;
 export const MAX_SHIP_COUNT = 5;
 export const BOARD_SIZE = 10;
 
+const SHIP_TYPE_BY_SIZE: Record<number, ShipType> = {
+  1: "destroyer",
+  2: "submarine",
+  3: "cruiser",
+  4: "battleship",
+  5: "carrier",
+};
+
+const SHIP_NAME_BY_SIZE: Record<number, string> = {
+  1: "Destroyer",
+  2: "Submarine",
+  3: "Cruiser",
+  4: "Battleship",
+  5: "Carrier",
+};
+
+export function getShipType(size: number): ShipType {
+  return SHIP_TYPE_BY_SIZE[size] ?? "destroyer";
+}
+
+export function getShipName(size: number): string {
+  return SHIP_NAME_BY_SIZE[size] ?? `Ship-${size}`;
+}
+
 export interface MatchShip {
   id: string;
+  type: ShipType;
   size: number;
   hits: number;
   sunk: boolean;
   cells: Coordinate[];
+  orientation: Orientation;
 }
 
 /**
@@ -31,10 +57,12 @@ export function getFleetSizes(shipCount: number): number[] {
 export function createFleetState(shipCount: number): MatchShip[] {
   return getFleetSizes(shipCount).map((size, index) => ({
     id: `ship-${index + 1}`,
+    type: getShipType(size),
     size,
     hits: 0,
     sunk: false,
-    cells: []
+    cells: [],
+    orientation: "horizontal" as Orientation,
   }));
 }
 
