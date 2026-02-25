@@ -4,6 +4,11 @@ import { BoardGrid } from "../components/game/BoardGrid";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../hooks/useAuth";
 import type { CellState } from "../types";
+import {
+  MAX_SHIP_COUNT,
+  MIN_SHIP_COUNT,
+  createFleetState
+} from "../game/shipRules";
 
 /** Build a blank 10×10 board */
 function emptyBoard(): CellState[][] {
@@ -43,6 +48,8 @@ interface PlayerInfo {
 export function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const { user } = useAuth();
+  const [shipCount, setShipCount] = useState<number>(5);
+  const [fleet, setFleet] = useState(() => createFleetState(5));
 
   const [myBoard] = useState<CellState[][]>(demoMyBoard);
   const [opponentBoard, setOpponentBoard] =
@@ -97,6 +104,10 @@ export function GamePage() {
 
     fetchPlayers();
   }, [gameId, user]);
+  const handleShipCountChange = (nextShipCount: number) => {
+    setShipCount(nextShipCount);
+    setFleet(createFleetState(nextShipCount));
+  };
 
   const handleOpponentCellClick = (row: number, col: number) => {
     setOpponentBoard((prev) => {
@@ -145,6 +156,45 @@ export function GamePage() {
             title={opponentInfo?.displayName ?? "Opponent's Waters"}
           />
         </div>
+
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
+              Fleet Rule Validation
+            </h2>
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              Ship Count
+              <select
+                value={shipCount}
+                onChange={(e) => handleShipCountChange(Number(e.target.value))}
+                className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-slate-100"
+              >
+                {Array.from(
+                  { length: MAX_SHIP_COUNT - MIN_SHIP_COUNT + 1 },
+                  (_, i) => i + MIN_SHIP_COUNT
+                ).map((count) => (
+                  <option key={count} value={count}>
+                    {count}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <p className="mt-3 text-xs text-slate-400">
+            Rule: selecting N ships creates ships of sizes 1..N.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {fleet.map((ship) => (
+              <span
+                key={ship.id}
+                className="rounded-md border border-blue-500/30 bg-blue-950/30 px-2.5 py-1 text-xs text-blue-300"
+              >
+                {ship.id}: 1x{ship.size}
+              </span>
+            ))}
+          </div>
+        </section>
 
         {/* Legend */}
         <div className="flex flex-wrap justify-center gap-4 text-[10px] sm:text-xs text-slate-400">
