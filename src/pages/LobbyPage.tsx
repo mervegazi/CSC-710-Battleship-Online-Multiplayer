@@ -1,6 +1,8 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { useAuth } from "../hooks/useAuth";
 import { useLobby } from "../hooks/useLobby";
+import { useTable } from "../hooks/useTable";
 import { LobbyHeader } from "../components/lobby/LobbyHeader";
 import { LobbyStats } from "../components/lobby/LobbyStats";
 import { OnlineUsersList } from "../components/lobby/OnlineUsersList";
@@ -8,11 +10,38 @@ import { QuickMatchButton } from "../components/lobby/QuickMatchButton";
 import { CreateTableButton } from "../components/lobby/CreateTableButton";
 import { TableList } from "../components/lobby/TableList";
 import { LobbyChat } from "../components/lobby/LobbyChat";
+import { HostTableModal } from "../components/lobby/HostTableModal";
+import { Modal } from "../components/common/Modal";
+import { Button } from "../components/common/Button";
 import type { LobbyStatus } from "../types";
 
 export function LobbyPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { onlineUsers, stats, updateStatus } = useLobby();
+  const {
+    tables,
+    myTable,
+    myRequest,
+    incomingRequests,
+    role,
+    loading: tableLoading,
+    error: tableError,
+    createTable,
+    cancelTable,
+    sendJoinRequest,
+    cancelJoinRequest,
+    acceptRequest,
+    rejectRequest,
+    matchedGameId,
+    matchedOpponent,
+  } = useTable();
+
+  const [showHostModal, setShowHostModal] = useState(false);
+  const [showMatchModal, setShowMatchModal] = useState(false);
+  const [countdown, setCountdown] = useState(5);
+  // Track the last table ID we auto-opened the modal for, to avoid re-opening on every render
+  const autoOpenedForTableRef = useRef<string | null>(null);
 
   // Update presence status when matchmaking state changes
   const handleMatchmakingStatusChange = useCallback(
@@ -22,11 +51,86 @@ export function LobbyPage() {
       } else if (matchStatus === "matched") {
         updateStatus("in_game" as LobbyStatus);
       } else {
-        updateStatus("idle" as LobbyStatus);
+        // Only reset to idle if not hosting a table
+        if (role !== "host") {
+          updateStatus("idle" as LobbyStatus);
+        }
       }
     },
-    [updateStatus]
+    [updateStatus, role]
   );
+
+  // Update presence when hosting a table
+  useEffect(() => {
+    if (role === "host") {
+      updateStatus("hosting_table" as LobbyStatus);
+    }
+  }, [role, updateStatus]);
+
+  // Show host modal automatically when a NEW table is created (only once per table)
+  useEffect(() => {
+    if (role === "host" && myTable && autoOpenedForTableRef.current !== myTable.id) {
+      autoOpenedForTableRef.current = myTable.id;
+      setShowHostModal(true);
+    }
+    // When table is gone, reset the ref so next table auto-opens again
+    if (!myTable) {
+      autoOpenedForTableRef.current = null;
+    }
+  }, [role, myTable]);
+
+  // Show match modal when a game is created (from table accept)
+  useEffect(() => {
+    if (matchedGameId) {
+      setShowMatchModal(true);
+      setCountdown(5);
+    }
+  }, [matchedGameId]);
+
+  // Auto-navigate countdown when matched
+  useEffect(() => {
+    if (!showMatchModal || !matchedGameId) return;
+
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          navigate(`/game/${matchedGameId}`);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [showMatchModal, matchedGameId, navigate]);
+
+  const handleCreateTable = async () => {
+    await createTable();
+  };
+
+  const handleCancelTable = async () => {
+    await cancelTable();
+    setShowHostModal(false);
+    updateStatus("idle" as LobbyStatus);
+  };
+
+  const handleJoinRequest = async (tableId: string) => {
+    await sendJoinRequest(tableId);
+  };
+
+  const handleAcceptRequest = async (requestId: string) => {
+    await acceptRequest(requestId);
+    setShowHostModal(false);
+  };
+
+  const handleJoinBattle = () => {
+    if (matchedGameId) {
+      navigate(`/game/${matchedGameId}`);
+    }
+  };
+
+  const canJoinTable = role === "none" && !myRequest;
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
@@ -45,9 +149,42 @@ export function LobbyPage() {
               />
             </div>
             <div className="flex-1">
-              <CreateTableButton />
+              <CreateTableButton
+                isHosting={role === "host"}
+                hasActiveRequest={role === "requester"}
+                loading={tableLoading}
+                onCreateTable={handleCreateTable}
+                onViewTable={() => setShowHostModal(true)}
+              />
             </div>
           </div>
+
+          {/* Pending request indicator */}
+          {role === "requester" && myRequest && (
+            <div className="rounded-lg border border-blue-500/20 bg-blue-950/20 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+                  <p className="text-xs text-blue-300">
+                    Waiting for host approval...
+                  </p>
+                </div>
+                <button
+                  onClick={cancelJoinRequest}
+                  className="text-xs text-slate-400 hover:text-slate-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Table error */}
+          {tableError && (
+            <div className="rounded-lg border border-red-500/20 bg-red-950/20 px-4 py-2">
+              <p className="text-xs text-red-400">{tableError}</p>
+            </div>
+          )}
 
           <OnlineUsersList
             users={onlineUsers}
@@ -57,10 +194,83 @@ export function LobbyPage() {
 
         {/* Main content */}
         <div className="flex flex-col gap-4">
-          <TableList />
+          <TableList
+            tables={tables}
+            currentUserId={user?.id ?? ""}
+            canJoin={canJoinTable}
+            onJoinRequest={handleJoinRequest}
+          />
           <LobbyChat />
         </div>
       </div>
+
+      {/* Host Table Modal */}
+      <HostTableModal
+        isOpen={showHostModal && role === "host"}
+        onClose={() => setShowHostModal(false)}
+        requests={incomingRequests}
+        onAccept={handleAcceptRequest}
+        onReject={rejectRequest}
+        onCancelTable={handleCancelTable}
+        loading={tableLoading}
+      />
+
+      {/* Match Found Modal (from table accept) */}
+      <Modal
+        isOpen={showMatchModal}
+        onClose={() => setShowMatchModal(false)}
+        title="Battle Stations!"
+      >
+        <div className="flex flex-col items-center gap-4 py-2">
+          <div className="relative flex h-24 w-24 items-center justify-center">
+            <div className="absolute h-full w-full animate-ping rounded-full border-2 border-emerald-500/20" />
+            <div
+              className="absolute h-3/4 w-3/4 animate-ping rounded-full border-2 border-emerald-500/30"
+              style={{ animationDelay: "0.5s" }}
+            />
+            <div className="relative z-10 text-4xl">🎯</div>
+          </div>
+
+          <div className="text-center">
+            <p className="text-lg font-bold text-emerald-300">
+              Game Created!
+            </p>
+            <p className="mt-1 text-sm text-slate-300">
+              Your opponent is
+            </p>
+            <p className="mt-1 text-xl font-bold text-white">
+              {matchedOpponent ?? "Unknown Captain"}
+            </p>
+          </div>
+
+          {matchedGameId && (
+            <div className="rounded-md bg-slate-800/60 px-3 py-1.5">
+              <p className="text-xs text-slate-400">
+                Game ID:{" "}
+                <span className="font-mono text-slate-300">
+                  {matchedGameId.slice(0, 8)}...
+                </span>
+              </p>
+            </div>
+          )}
+
+          <Button
+            fullWidth
+            onClick={handleJoinBattle}
+            className="bg-emerald-600 text-white hover:bg-emerald-500"
+          >
+            Join Battle ({countdown}s)
+          </Button>
+
+          <Button
+            fullWidth
+            variant="secondary"
+            onClick={() => setShowMatchModal(false)}
+          >
+            Return to Lobby
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
