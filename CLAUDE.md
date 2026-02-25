@@ -4,9 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Real-time browser-based multiplayer Battleship game for CSC 710 (Software Engineering). Players authenticate, join a lobby, find opponents via FIFO matchmaking or custom tables, place ships on a 10x10 grid, and battle in turn-based combat. All backend services (auth, database, realtime WebSocket) are provided by Supabase — there is no custom backend server.
+Real-time browser-based multiplayer Battleship game for CSC 710 (Software Engineering). Players authenticate, join a lobby, find opponents via FIFO matchmaking
+or custom tables, place ships on a 10x10 grid, and battle in turn-based combat. All backend services (auth, database, realtime WebSocket) are provided by
+Supabase — there is no custom backend server.
 
-The full design spec lives in `CSC710_Battleship_Technical_Document.md` at the repo root. It covers database schema (Section 6), realtime channel architecture (Section 11), component tree (Section 12), type definitions (Section 13.2), and the planned file structure (Section 12.3).
+The full design spec lives in `CSC710_Battleship_Technical_Document.md` at the repo root. It covers database schema (Section 6), realtime channel architecture
+(Section 11), component tree (Section 12), type definitions (Section 13.2), and the planned file structure (Section 12.3).
 
 ## Commands
 
@@ -29,7 +32,8 @@ VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
 ```
 
-**Important:** The codebase uses `VITE_SUPABASE_PUBLISHABLE_KEY` (not `VITE_SUPABASE_ANON_KEY`). The tech doc references `ANON_KEY` in some places — always use `PUBLISHABLE_KEY` to match `src/lib/supabase.ts` and the CI workflow.
+**Important:** The codebase uses `VITE_SUPABASE_PUBLISHABLE_KEY` (not `VITE_SUPABASE_ANON_KEY`). The tech doc references `ANON_KEY` in some places — always use
+`PUBLISHABLE_KEY` to match `src/lib/supabase.ts` and the CI workflow.
 
 GitHub Actions secrets use the same names for production builds.
 
@@ -63,14 +67,14 @@ src/
 
 ### Key routes (planned)
 
-| Route | Page | Auth Required |
-|-------|------|---------------|
-| `/` | Landing page | No |
-| `/login` | Login | No |
-| `/register` | Registration | No |
-| `/lobby` | Lobby (matchmaking, tables, chat) | Yes |
-| `/game/:gameId` | Game board | Yes |
-| `/profile` | Player profile | Yes |
+| Route           | Page                              | Auth Required |
+| --------------- | --------------------------------- | ------------- |
+| `/`             | Landing page                      | No            |
+| `/login`        | Login                             | No            |
+| `/register`     | Registration                      | No            |
+| `/lobby`        | Lobby (matchmaking, tables, chat) | Yes           |
+| `/game/:gameId` | Game board                        | Yes           |
+| `/profile`      | Player profile                    | Yes           |
 
 ## Database
 
@@ -101,15 +105,15 @@ Realtime must be enabled on: `games`, `games_players`, `moves`, `tables`, `table
 
 ## Realtime Channels (planned)
 
-| Channel | Purpose |
-|---------|---------|
-| `lobby` (Presence) | Track online users and their status |
-| `lobby-chat` | Chat message inserts |
-| `lobby-tables` | Table create/update/delete |
-| `table:{tableId}` | Join requests for specific table |
-| `matchmaking` | Queue changes, match notifications |
-| `game:{gameId}` | Moves, ready status, game state changes |
-| `game:{gameId}:presence` | Heartbeat and disconnect detection |
+| Channel                  | Purpose                                 |
+| ------------------------ | --------------------------------------- |
+| `lobby` (Presence)       | Track online users and their status     |
+| `lobby-chat`             | Chat message inserts                    |
+| `lobby-tables`           | Table create/update/delete              |
+| `table:{tableId}`        | Join requests for specific table        |
+| `matchmaking`            | Queue changes, match notifications      |
+| `game:{gameId}`          | Moves, ready status, game state changes |
+| `game:{gameId}:presence` | Heartbeat and disconnect detection      |
 
 ## Conventions
 
@@ -132,4 +136,5 @@ For SPA routing on GitHub Pages, a `public/404.html` redirect is needed (see tec
 
 ## Security Notes
 
-This is an academic project — no Supabase RLS policies are configured. All validation (move legality, turn order, ship placement) is client-side only. The Supabase anon key is intentionally public (Supabase design). Do not add any other secrets to the client bundle.
+This is an academic project — no Supabase RLS policies are configured. All validation (move legality, turn order, ship placement) is client-side only. The
+Supabase anon key is intentionally public (Supabase design). Do not add any other secrets to the client bundle.
