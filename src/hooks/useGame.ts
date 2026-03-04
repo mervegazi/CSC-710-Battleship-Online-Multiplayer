@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "./useAuth";
+import { useHeartbeat } from "./useHeartbeat";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type {
   Game,
@@ -39,6 +40,7 @@ export interface UseGameReturn {
   opponentPlayer: GamePlayer | null;
   moves: Move[];
   winnerId: string | null;
+  opponentConnected: boolean;
   loading: boolean;
   error: string | null;
   connectionStatus: ConnectionStatus;
@@ -79,6 +81,10 @@ export function useGame(gameId: string | undefined): UseGameReturn {
   const isMyTurn = game?.current_turn === user?.id && gameStatus === "in_progress";
   const winnerId = game?.winner_id ?? null;
   const gameShipCount = game?.ship_count ?? 5;
+
+  // Heartbeat / disconnect detection (must come after gameStatus)
+  const heartbeatActive = gameStatus === "setup" || gameStatus === "in_progress";
+  const { opponentConnected } = useHeartbeat(gameId, user?.id, heartbeatActive);
 
   // Derive board displays from state
   const myMoves = moves.filter((m) => m.player_id === user?.id);
@@ -391,10 +397,10 @@ export function useGame(gameId: string | undefined): UseGameReturn {
       setMyPlayer((prev) =>
         prev
           ? {
-              ...prev,
-              board: boardState,
-              ready: isNowReady,
-            }
+            ...prev,
+            board: boardState,
+            ready: isNowReady,
+          }
           : prev
       );
 
@@ -455,11 +461,11 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     setGame((prev) =>
       prev
         ? {
-            ...prev,
-            status: "abandoned",
-            winner_id: opponentPlayer?.player_id ?? null,
-            ended_at: new Date().toISOString(),
-          }
+          ...prev,
+          status: "abandoned",
+          winner_id: opponentPlayer?.player_id ?? null,
+          ended_at: new Date().toISOString(),
+        }
         : prev
     );
   }, [gameId, user, game, opponentPlayer]);
@@ -584,6 +590,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     opponentPlayer,
     moves,
     winnerId,
+    opponentConnected,
     loading,
     error,
     connectionStatus,

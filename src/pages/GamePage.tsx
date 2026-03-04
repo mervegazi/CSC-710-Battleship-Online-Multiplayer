@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router";
 import { BoardGrid } from "../components/game/BoardGrid";
 import { TurnIndicator } from "../components/game/TurnIndicator";
@@ -53,6 +53,7 @@ export function GamePage() {
     moves: gameMoves,
     connectionStatus,
     gameShipCount,
+    opponentConnected,
     endPlacementTurn,
     abandonGame,
     attack,
@@ -62,6 +63,59 @@ export function GamePage() {
   const isPlaying = gameStatus === "in_progress";
   const isFinished = gameStatus === "finished";
   const isReady = myPlayer?.ready ?? false;
+
+  // ── Opponent disconnect countdown ─────────────────────────────────
+  const DISCONNECT_COUNTDOWN = 30; // seconds
+  const [disconnectCountdown, setDisconnectCountdown] = useState<number | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearCountdown = useCallback(() => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    setDisconnectCountdown(null);
+  }, []);
+
+  useEffect(() => {
+    const isActive = gameStatus === "setup" || gameStatus === "in_progress";
+
+    if (!opponentConnected && isActive) {
+      // Start countdown if not already running
+      if (disconnectCountdown === null) {
+        setDisconnectCountdown(DISCONNECT_COUNTDOWN);
+        countdownRef.current = setInterval(() => {
+          setDisconnectCountdown((prev) => {
+            if (prev === null || prev <= 1) {
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      }
+    } else {
+      // Opponent reconnected or game is no longer active — cancel countdown
+      clearCountdown();
+    }
+
+    return () => {
+      // Cleanup only on unmount, not on every re-render
+    };
+  }, [opponentConnected, gameStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-end game when countdown reaches 0
+  useEffect(() => {
+    if (disconnectCountdown === 0) {
+      clearCountdown();
+      // Abandon game — current user wins
+      abandonGame().then(() => {
+        navigate("/lobby", {
+          replace: true,
+          state: { notice: "Opponent disconnected. You win!" },
+        });
+      });
+    }
+  }, [disconnectCountdown]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const myPlacedCount = useMemo(
     () => fleet.filter((ship) => ship.cells.length > 0).length,
@@ -314,6 +368,15 @@ export function GamePage() {
                 <span className="text-blue-400">{myInfo?.displayName ?? "You"}</span>
                 <span className="text-slate-500">vs</span>
                 <span className="text-red-400">{opponentInfo?.displayName ?? "Opponent"}</span>
+                {(isSetup || isPlaying) && (
+                  <span
+                    className="text-base ml-1"
+                    title={opponentConnected ? "Opponent connected" : "Opponent disconnected"}
+                    style={opponentConnected ? { animation: "heartbeat 1.5s ease-in-out infinite" } : {}}
+                  >
+                    {opponentConnected ? "💚" : "🔴"}
+                  </span>
+                )}
               </>
             )}
           </h1>
@@ -331,6 +394,20 @@ export function GamePage() {
           <div className="rounded border border-amber-500/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-300 flex items-center gap-2">
             <span className="inline-block h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
             Connection lost. Attempting to reconnect...
+          </div>
+        )}
+
+        {!opponentConnected && (gameStatus === "setup" || gameStatus === "in_progress") && (
+          <div className="rounded-lg border-2 border-red-500/60 bg-red-950/40 px-4 py-3 text-sm text-red-200 flex items-center gap-3">
+            <span className="text-2xl">⚠️</span>
+            <div>
+              <p className="font-bold">Opponent Disconnected!</p>
+              <p className="text-xs text-red-300 mt-0.5">
+                Game will automatically end in{" "}
+                <span className="font-bold text-white text-sm">{disconnectCountdown ?? "—"}</span>{" "}
+                seconds if they don't reconnect.
+              </p>
+            </div>
           </div>
         )}
 
@@ -407,11 +484,10 @@ export function GamePage() {
                       setPreviewMap({});
                       setPlacementError(null);
                     }}
-                    className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
-                      isSelected
-                        ? "border-blue-400 bg-blue-600/20 text-blue-200"
-                        : "border-slate-700 bg-slate-800 text-slate-200 hover:border-slate-500"
-                    }`}
+                    className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${isSelected
+                      ? "border-blue-400 bg-blue-600/20 text-blue-200"
+                      : "border-slate-700 bg-slate-800 text-slate-200 hover:border-slate-500"
+                      }`}
                   >
                     {getShipName(ship.size)} (1x{ship.size}) {isPlaced ? "Placed" : "Unplaced"}
                     {isCurrentTurnShip ? " - Current Turn" : ""}
@@ -463,11 +539,10 @@ export function GamePage() {
                 type="button"
                 onClick={handleEndPlacementTurn}
                 disabled={!canEndTurn}
-                className={`rounded-lg px-6 py-2 text-sm font-semibold transition-colors ${
-                  canEndTurn
-                    ? "bg-emerald-600 text-white hover:bg-emerald-500"
-                    : "bg-slate-700 text-slate-400 cursor-not-allowed"
-                }`}
+                className={`rounded-lg px-6 py-2 text-sm font-semibold transition-colors ${canEndTurn
+                  ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                  : "bg-slate-700 text-slate-400 cursor-not-allowed"
+                  }`}
               >
                 {submittingTurn
                   ? "Ending Turn..."
