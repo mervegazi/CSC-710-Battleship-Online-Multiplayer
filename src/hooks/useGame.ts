@@ -37,14 +37,24 @@ export interface UseGameReturn {
   opponentInfo: PlayerInfo | null;
   myPlayer: GamePlayer | null;
   opponentPlayer: GamePlayer | null;
+  moves: Move[];
   winnerId: string | null;
   loading: boolean;
   error: string | null;
   connectionStatus: ConnectionStatus;
+  gameShipCount: number;
   submitReady: (fleet: MatchShip[]) => Promise<void>;
-  endPlacementTurn: (fleet: MatchShip[], shipSize: number) => Promise<void>;
+  endPlacementTurn: (fleet: MatchShip[], shipSize: number, shipCount: number) => Promise<void>;
   abandonGame: () => Promise<void>;
   attack: (row: number, col: number) => Promise<void>;
+}
+
+async function updateProfileStats(winnerId: string, loserId: string) {
+  // Atomic increment via Postgres RPC to avoid lost-update race conditions
+  await Promise.all([
+    supabase.rpc("increment_wins", { player_id: winnerId }),
+    supabase.rpc("increment_losses", { player_id: loserId }),
+  ]);
 }
 
 export function useGame(gameId: string | undefined): UseGameReturn {
@@ -68,6 +78,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
   const currentTurnPlayerId = game?.current_turn ?? null;
   const isMyTurn = game?.current_turn === user?.id && gameStatus === "in_progress";
   const winnerId = game?.winner_id ?? null;
+  const gameShipCount = game?.ship_count ?? 5;
 
   // Derive board displays from state
   const myMoves = moves.filter((m) => m.player_id === user?.id);
@@ -340,7 +351,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
   );
 
   const endPlacementTurn = useCallback(
-    async (fleet: MatchShip[], shipSize: number) => {
+    async (fleet: MatchShip[], shipSize: number, shipCount: number) => {
       if (!gameId || !user || !myPlayer || !opponentPlayer || !game) return;
       if (game.status !== "setup") return;
       if (game.current_turn !== user.id) {
@@ -357,6 +368,14 @@ export function useGame(gameId: string | undefined): UseGameReturn {
       const boardState = convertFleetToBoard(fleet);
       const placedCount = boardState.ships.length;
       const isNowReady = placedCount === fleet.length;
+
+      // Lock ship_count in DB on first placement so both players use the same count
+      if (placedCount === 1 && game.ship_count !== shipCount) {
+        await supabase
+          .from("games")
+          .update({ ship_count: shipCount })
+          .eq("id", gameId);
+      }
 
       const { error: updateError } = await supabase
         .from("games_players")
@@ -426,6 +445,11 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     if (abandonError) {
       setError(abandonError.message);
       return;
+    }
+
+    // Update profile stats: abandoner loses, opponent wins
+    if (opponentPlayer?.player_id) {
+      await updateProfileStats(opponentPlayer.player_id, user.id);
     }
 
     setGame((prev) =>
@@ -522,6 +546,9 @@ export function useGame(gameId: string | undefined): UseGameReturn {
                 ended_at: new Date().toISOString(),
               })
               .eq("id", gameId);
+
+            // Update profile stats for both players
+            await updateProfileStats(user.id, opponentPlayer.player_id);
           } else {
             // Switch turn
             await supabase
@@ -555,10 +582,12 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     opponentInfo,
     myPlayer,
     opponentPlayer,
+    moves,
     winnerId,
     loading,
     error,
     connectionStatus,
+    gameShipCount,
     submitReady,
     endPlacementTurn,
     abandonGame,

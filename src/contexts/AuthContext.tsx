@@ -195,6 +195,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Realtime subscription for profile updates (stats changes after game end)
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`profile:${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${user.id}`,
+        },
+        (payload) => {
+          setProfile(payload.new as Profile);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const signUp = useCallback(
     async (email: string, password: string, displayName: string) => {
       const { error } = await supabase.auth.signUp({
