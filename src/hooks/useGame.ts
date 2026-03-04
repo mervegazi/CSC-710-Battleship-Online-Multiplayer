@@ -25,6 +25,8 @@ interface PlayerInfo {
   displayName: string;
 }
 
+export type ConnectionStatus = "connecting" | "connected" | "disconnected";
+
 export interface UseGameReturn {
   gameStatus: GameStatus;
   currentTurnPlayerId: string | null;
@@ -38,6 +40,7 @@ export interface UseGameReturn {
   winnerId: string | null;
   loading: boolean;
   error: string | null;
+  connectionStatus: ConnectionStatus;
   submitReady: (fleet: MatchShip[]) => Promise<void>;
   endPlacementTurn: (fleet: MatchShip[], shipSize: number) => Promise<void>;
   abandonGame: () => Promise<void>;
@@ -57,6 +60,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
   const [error, setError] = useState<string | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   // Prevent duplicate attack processing
   const attackingRef = useRef(false);
 
@@ -207,11 +211,88 @@ export function useGame(gameId: string | undefined): UseGameReturn {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          setConnectionStatus("connected");
+        } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+          setConnectionStatus("disconnected");
+        } else if (status === "TIMED_OUT") {
+          setConnectionStatus("disconnected");
+          setTimeout(() => {
+            channel.subscribe();
+          }, 3000);
+        }
+      });
 
+    setConnectionStatus("connecting");
     channelRef.current = channel;
 
+    // Browser online/offline detection for immediate UI feedback
+    const handleOffline = () => setConnectionStatus("disconnected");
+    const handleOnline = () => {
+      setConnectionStatus("connecting");
+      // Re-subscribe to pick up any missed events
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+      const newChannel = supabase
+        .channel(`game:${gameId}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "moves", filter: `game_id=eq.${gameId}` },
+          (payload) => {
+            const newMove = payload.new as Move;
+            setMoves((prev) => {
+              if (prev.some((m) => m.id === newMove.id)) return prev;
+              return [...prev, newMove];
+            });
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "games", filter: `id=eq.${gameId}` },
+          (payload) => setGame(payload.new as Game)
+        )
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "games_players", filter: `game_id=eq.${gameId}` },
+          (payload) => {
+            const updated = payload.new as GamePlayer;
+            if (updated.player_id === currentUserId) {
+              setMyPlayer(updated);
+            } else {
+              setOpponentPlayer(updated);
+            }
+          }
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") setConnectionStatus("connected");
+          else if (status === "CLOSED" || status === "CHANNEL_ERROR") setConnectionStatus("disconnected");
+        });
+      channelRef.current = newChannel;
+
+      // Re-fetch latest state to catch anything missed while offline
+      Promise.all([
+        supabase.from("games").select("*").eq("id", gameId).single(),
+        supabase.from("games_players").select("*").eq("game_id", gameId),
+        supabase.from("moves").select("*").eq("game_id", gameId).order("move_number", { ascending: true }),
+      ]).then(([gameRes, playersRes, movesRes]) => {
+        if (gameRes.data) setGame(gameRes.data as Game);
+        if (playersRes.data) {
+          const players = playersRes.data as GamePlayer[];
+          setMyPlayer(players.find((p) => p.player_id === currentUserId) ?? null);
+          setOpponentPlayer(players.find((p) => p.player_id !== currentUserId) ?? null);
+        }
+        if (movesRes.data) setMoves(movesRes.data as Move[]);
+      });
+    };
+
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+
     return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
@@ -388,9 +469,18 @@ export function useGame(gameId: string | undefined): UseGameReturn {
         myPreviousMoves
       );
 
-      const moveNumber = moves.length + 1;
-
       try {
+        // Fetch current max move_number from DB to avoid race conditions
+        const { data: maxRow } = await supabase
+          .from("moves")
+          .select("move_number")
+          .eq("game_id", gameId)
+          .order("move_number", { ascending: false })
+          .limit(1)
+          .single();
+
+        const moveNumber = (maxRow?.move_number ?? 0) + 1;
+
         // INSERT move
         const { error: moveError } = await supabase.from("moves").insert({
           game_id: gameId,
@@ -468,6 +558,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     winnerId,
     loading,
     error,
+    connectionStatus,
     submitReady,
     endPlacementTurn,
     abandonGame,
