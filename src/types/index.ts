@@ -36,6 +36,7 @@ export interface Game {
   status: GameStatus;
   current_turn: string | null;
   winner_id: string | null;
+  ship_count: number;
   created_at: string;
   started_at: string | null;
   ended_at: string | null;

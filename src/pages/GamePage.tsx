@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router";
 import { BoardGrid } from "../components/game/BoardGrid";
 import { TurnIndicator } from "../components/game/TurnIndicator";
 import { GameEndModal } from "../components/game/GameEndModal";
+import type { GameStats } from "../components/game/GameEndModal";
 import { useAuth } from "../hooks/useAuth";
 import { useGame } from "../hooks/useGame";
 import type { Orientation } from "../types";
@@ -49,7 +50,9 @@ export function GamePage() {
     winnerId,
     loading,
     error,
+    moves: gameMoves,
     connectionStatus,
+    gameShipCount,
     endPlacementTurn,
     abandonGame,
     attack,
@@ -89,6 +92,31 @@ export function GamePage() {
     !submittingTurn;
 
   const myDisplayBoard = isSetup && !isReady ? boardFromFleet(fleet) : gameBoardMy;
+
+  const endStats = useMemo<GameStats | null>(() => {
+    if (!isFinished || !user) return null;
+    const myMoves = gameMoves.filter((m) => m.player_id === user.id);
+    const hits = myMoves.filter((m) => m.result === "hit" || m.result === "sunk").length;
+    const misses = myMoves.filter((m) => m.result === "miss").length;
+    const totalShips = myPlayer?.board?.ships?.length ?? 0;
+    const shipsLost = myPlayer?.board?.ships?.filter((s) => s.sunk).length ?? 0;
+    return {
+      totalMoves: myMoves.length,
+      hits,
+      misses,
+      accuracy: hits + misses > 0 ? Math.round((hits / (hits + misses)) * 100) : 0,
+      shipsLost,
+      totalShips,
+    };
+  }, [isFinished, user, gameMoves, myPlayer]);
+
+  // Sync local shipCount with DB value when opponent has already locked it
+  useEffect(() => {
+    if (gameShipCount !== shipCount) {
+      setShipCount(gameShipCount);
+      setFleet(createFleetState(gameShipCount));
+    }
+  }, [gameShipCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!myPlayer) return;
@@ -237,7 +265,7 @@ export function GamePage() {
 
     setSubmittingTurn(true);
     try {
-      await endPlacementTurn(fleet, activeShip.size);
+      await endPlacementTurn(fleet, activeShip.size, shipCount);
       setPlacementError(null);
       setPreviewMap({});
       setDraggedShipId(null);
@@ -486,11 +514,13 @@ export function GamePage() {
           ))}
         </div>
 
-        {isFinished && user && (
+        {isFinished && user && endStats && (
           <GameEndModal
             isOpen
             isWinner={winnerId === user.id}
             opponentName={opponentInfo?.displayName ?? "Opponent"}
+            stats={endStats}
+            onPlayAgain={() => navigate("/lobby", { state: { quickMatch: true } })}
           />
         )}
 
