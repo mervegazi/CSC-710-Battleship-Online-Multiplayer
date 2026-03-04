@@ -40,10 +40,10 @@ export function BoardGrid({
                 </h2>
             )}
 
-            {/* Responsive wrapper — never wider than 500 px, fills 90 vw on small screens */}
+            {/* Responsive wrapper — never wider than 500 px, with breathing room on mobile */}
             <div
-                className="w-full"
-                style={{ maxWidth: "min(90vw, 500px)" }}
+                className="w-full px-2 sm:px-0"
+                style={{ maxWidth: "min(85vw, 500px)" }}
             >
                 <div
                     className="grid gap-[2px] sm:gap-1"
