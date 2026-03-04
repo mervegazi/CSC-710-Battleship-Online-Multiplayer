@@ -1,4 +1,4 @@
-import type { Coordinate, Orientation, ShipType } from "../types";
+import type { BoardState, Coordinate, Orientation, ShipType } from "../types";
 
 export const MIN_SHIP_COUNT = 1;
 export const MAX_SHIP_COUNT = 5;
@@ -100,4 +100,25 @@ export function hasOverlap(
   );
 
   return nextCells.some((cell) => occupied.has(`${cell.x},${cell.y}`));
+}
+
+export function hydrateFleetFromBoard(
+  shipCount: number,
+  board?: BoardState | null
+): MatchShip[] {
+  const baseFleet = createFleetState(shipCount);
+  if (!board?.ships?.length) return baseFleet;
+
+  const boardBySize = new Map(board.ships.map((ship) => [ship.size, ship]));
+
+  return baseFleet.map((ship) => {
+    const placed = boardBySize.get(ship.size);
+    if (!placed) return ship;
+    return {
+      ...ship,
+      cells: placed.cells,
+      orientation: placed.orientation,
+      sunk: placed.sunk,
+    };
+  });
 }

@@ -27,16 +27,19 @@ interface PlayerInfo {
 
 export interface UseGameReturn {
   gameStatus: GameStatus;
+  currentTurnPlayerId: string | null;
   isMyTurn: boolean;
   myBoard: CellState[][];
   opponentBoard: CellState[][];
   myInfo: PlayerInfo | null;
   opponentInfo: PlayerInfo | null;
   myPlayer: GamePlayer | null;
+  opponentPlayer: GamePlayer | null;
   winnerId: string | null;
   loading: boolean;
   error: string | null;
   submitReady: (fleet: MatchShip[]) => Promise<void>;
+  endPlacementTurn: (fleet: MatchShip[], shipSize: number) => Promise<void>;
   attack: (row: number, col: number) => Promise<void>;
 }
 
@@ -57,6 +60,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
   const attackingRef = useRef(false);
 
   const gameStatus: GameStatus = game?.status ?? "setup";
+  const currentTurnPlayerId = game?.current_turn ?? null;
   const isMyTurn = game?.current_turn === user?.id && gameStatus === "in_progress";
   const winnerId = game?.winner_id ?? null;
 
@@ -253,6 +257,77 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     [gameId, user, myPlayer]
   );
 
+  const endPlacementTurn = useCallback(
+    async (fleet: MatchShip[], shipSize: number) => {
+      if (!gameId || !user || !myPlayer || !opponentPlayer || !game) return;
+      if (game.status !== "setup") return;
+      if (game.current_turn !== user.id) {
+        setError("It is not your placement turn.");
+        return;
+      }
+
+      const ship = fleet.find((s) => s.size === shipSize);
+      if (!ship || ship.cells.length !== shipSize) {
+        setError(`Place your 1x${shipSize} ship before ending turn.`);
+        return;
+      }
+
+      const boardState = convertFleetToBoard(fleet);
+      const placedCount = boardState.ships.length;
+      const isNowReady = placedCount === fleet.length;
+
+      const { error: updateError } = await supabase
+        .from("games_players")
+        .update({ board: boardState, ready: isNowReady })
+        .eq("game_id", gameId)
+        .eq("player_id", user.id);
+
+      if (updateError) {
+        setError(updateError.message);
+        return;
+      }
+
+      setMyPlayer((prev) =>
+        prev
+          ? {
+              ...prev,
+              board: boardState,
+              ready: isNowReady,
+            }
+          : prev
+      );
+
+      const { data: players, error: playersError } = await supabase
+        .from("games_players")
+        .select("ready")
+        .eq("game_id", gameId);
+
+      if (playersError) {
+        setError(playersError.message);
+        return;
+      }
+
+      const allReady =
+        players && players.length === 2 && players.every((p) => p.ready);
+
+      if (allReady) {
+        await supabase
+          .from("games")
+          .update({
+            status: "in_progress",
+            started_at: new Date().toISOString(),
+          })
+          .eq("id", gameId);
+      } else {
+        await supabase
+          .from("games")
+          .update({ current_turn: opponentPlayer.player_id })
+          .eq("id", gameId);
+      }
+    },
+    [gameId, user, myPlayer, opponentPlayer, game]
+  );
+
   // ── Attack ──────────────────────────────────────────────────────────
   const attack = useCallback(
     async (row: number, col: number) => {
@@ -351,16 +426,19 @@ export function useGame(gameId: string | undefined): UseGameReturn {
 
   return {
     gameStatus,
+    currentTurnPlayerId,
     isMyTurn,
     myBoard,
     opponentBoard,
     myInfo,
     opponentInfo,
     myPlayer,
+    opponentPlayer,
     winnerId,
     loading,
     error,
     submitReady,
+    endPlacementTurn,
     attack,
   };
 }
