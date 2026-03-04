@@ -69,13 +69,6 @@ export function resolveAttack(
 }
 
 /**
- * Check if all ships on a board are sunk.
- */
-export function checkWin(board: BoardState): boolean {
-  return board.ships.length > 0 && board.ships.every((ship) => ship.sunk);
-}
-
-/**
  * Check win condition by counting moves against the board.
  * More reliable than checking sunk flags since it uses actual move data.
  */
