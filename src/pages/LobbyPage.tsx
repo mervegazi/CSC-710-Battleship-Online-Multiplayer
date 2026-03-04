@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "../hooks/useAuth";
 import { useLobby } from "../hooks/useLobby";
 import { useTable } from "../hooks/useTable";
@@ -17,6 +17,7 @@ import type { LobbyStatus } from "../types";
 
 export function LobbyPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { onlineUsers, stats, updateStatus } = useLobby();
   const {
@@ -40,6 +41,7 @@ export function LobbyPage() {
   const [showHostModal, setShowHostModal] = useState(false);
   const [showMatchModal, setShowMatchModal] = useState(false);
   const [countdown, setCountdown] = useState(5);
+  const [notice, setNotice] = useState<string | null>(null);
   // Track the last table ID we auto-opened the modal for, to avoid re-opening on every render
   const autoOpenedForTableRef = useRef<string | null>(null);
 
@@ -78,6 +80,14 @@ export function LobbyPage() {
       autoOpenedForTableRef.current = null;
     }
   }, [role, myTable]);
+
+  // One-time notice from navigation state (e.g. match abandoned redirect)
+  useEffect(() => {
+    const state = location.state as { notice?: string } | null;
+    if (state?.notice) {
+      setNotice(state.notice);
+    }
+  }, [location.state]);
 
   // Show match modal when a game is created (from table accept)
   useEffect(() => {
@@ -139,6 +149,21 @@ export function LobbyPage() {
       <div className="flex flex-1 flex-col gap-4 p-4 lg:grid lg:grid-cols-[280px_1fr] lg:gap-6 lg:p-6">
         {/* Sidebar */}
         <div className="flex flex-col gap-4">
+          {notice && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-950/30 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-xs text-amber-200">{notice}</p>
+                <button
+                  type="button"
+                  onClick={() => setNotice(null)}
+                  className="text-xs text-amber-300 hover:text-amber-100"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           <LobbyStats stats={stats} />
 
           <div className="flex gap-3 lg:flex-col">

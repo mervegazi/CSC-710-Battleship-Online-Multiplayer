@@ -40,6 +40,7 @@ export interface UseGameReturn {
   error: string | null;
   submitReady: (fleet: MatchShip[]) => Promise<void>;
   endPlacementTurn: (fleet: MatchShip[], shipSize: number) => Promise<void>;
+  abandonGame: () => Promise<void>;
   attack: (row: number, col: number) => Promise<void>;
 }
 
@@ -328,6 +329,36 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     [gameId, user, myPlayer, opponentPlayer, game]
   );
 
+  const abandonGame = useCallback(async () => {
+    if (!gameId || !user || !game) return;
+    if (game.status === "finished" || game.status === "abandoned") return;
+
+    const { error: abandonError } = await supabase
+      .from("games")
+      .update({
+        status: "abandoned",
+        winner_id: opponentPlayer?.player_id ?? null,
+        ended_at: new Date().toISOString(),
+      })
+      .eq("id", gameId);
+
+    if (abandonError) {
+      setError(abandonError.message);
+      return;
+    }
+
+    setGame((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "abandoned",
+            winner_id: opponentPlayer?.player_id ?? null,
+            ended_at: new Date().toISOString(),
+          }
+        : prev
+    );
+  }, [gameId, user, game, opponentPlayer]);
+
   // ── Attack ──────────────────────────────────────────────────────────
   const attack = useCallback(
     async (row: number, col: number) => {
@@ -439,6 +470,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     error,
     submitReady,
     endPlacementTurn,
+    abandonGame,
     attack,
   };
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link } from "react-router";
+import { useParams, useNavigate } from "react-router";
 import { BoardGrid } from "../components/game/BoardGrid";
 import { TurnIndicator } from "../components/game/TurnIndicator";
 import { GameEndModal } from "../components/game/GameEndModal";
@@ -20,6 +20,7 @@ import { boardFromFleet } from "../lib/gameLogic";
 
 export function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
+  const navigate = useNavigate();
   const { user } = useAuth();
 
   const [shipCount, setShipCount] = useState<number>(5);
@@ -30,6 +31,8 @@ export function GamePage() {
   const [placementError, setPlacementError] = useState<string | null>(null);
   const [previewMap, setPreviewMap] = useState<Record<string, "valid" | "invalid">>({});
   const [submittingTurn, setSubmittingTurn] = useState(false);
+  const [leavingMatch, setLeavingMatch] = useState(false);
+  const [showOpponentLeftPopup, setShowOpponentLeftPopup] = useState(false);
   const [turnLockedShipSize, setTurnLockedShipSize] = useState<number | null>(null);
   const wasMyPlacementTurnRef = useRef(false);
 
@@ -47,12 +50,13 @@ export function GamePage() {
     loading,
     error,
     endPlacementTurn,
+    abandonGame,
     attack,
   } = useGame(gameId);
 
   const isSetup = gameStatus === "setup";
   const isPlaying = gameStatus === "in_progress";
-  const isFinished = gameStatus === "finished" || gameStatus === "abandoned";
+  const isFinished = gameStatus === "finished";
   const isReady = myPlayer?.ready ?? false;
 
   const myPlacedCount = useMemo(
@@ -105,6 +109,13 @@ export function GamePage() {
     }
     wasMyPlacementTurnRef.current = isMyPlacementTurn;
   }, [isMyPlacementTurn, nextPlacementSize]);
+
+  useEffect(() => {
+    if (gameStatus !== "abandoned" || !user) return;
+    if (leavingMatch) return;
+    if (winnerId !== user.id) return;
+    setShowOpponentLeftPopup(true);
+  }, [gameStatus, user, winnerId, leavingMatch]);
 
   const handleShipCountChange = (nextShipCount: number) => {
     if (shipCountLocked) return;
@@ -241,6 +252,27 @@ export function GamePage() {
     attack(row, col);
   };
 
+  const handleLeaveMatch = async () => {
+    if (leavingMatch) return;
+    setLeavingMatch(true);
+    try {
+      await abandonGame();
+    } finally {
+      navigate("/lobby", {
+        replace: true,
+        state: { notice: "You left the match." },
+      });
+    }
+  };
+
+  const handleReturnToLobbyAfterOpponentLeft = () => {
+    setShowOpponentLeftPopup(false);
+    navigate("/lobby", {
+      replace: true,
+      state: { notice: `${opponentInfo?.displayName ?? "Opponent"} left the match.` },
+    });
+  };
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
@@ -256,12 +288,14 @@ export function GamePage() {
               </>
             )}
           </h1>
-          <Link
-            to="/lobby"
-            className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+          <button
+            type="button"
+            onClick={handleLeaveMatch}
+            disabled={leavingMatch}
+            className="text-sm text-blue-400 hover:text-blue-300 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Back to Lobby
-          </Link>
+            {leavingMatch ? "Leaving..." : "Back to Lobby"}
+          </button>
         </div>
 
         {error && (
@@ -450,6 +484,26 @@ export function GamePage() {
             isWinner={winnerId === user.id}
             opponentName={opponentInfo?.displayName ?? "Opponent"}
           />
+        )}
+
+        {showOpponentLeftPopup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+            <div className="w-full max-w-md rounded-xl border border-amber-500/40 bg-slate-900 p-6 shadow-xl">
+              <h2 className="text-lg font-semibold text-amber-300">
+                Opponent Left Match
+              </h2>
+              <p className="mt-3 text-sm text-slate-200">
+                {opponentInfo?.displayName ?? "The other player"} left the game.
+              </p>
+              <button
+                type="button"
+                onClick={handleReturnToLobbyAfterOpponentLeft}
+                className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+              >
+                Return to Lobby
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </main>
