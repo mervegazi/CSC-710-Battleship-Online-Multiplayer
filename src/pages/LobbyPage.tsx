@@ -34,13 +34,18 @@ export function LobbyPage() {
     cancelJoinRequest,
     acceptRequest,
     rejectRequest,
+    tableMatchStatus,
+    acceptedByMe,
+    opponentAccepted,
+    acceptTableMatch,
+    declineTableMatch,
     matchedGameId,
     matchedOpponent,
   } = useTable();
 
   const [showHostModal, setShowHostModal] = useState(false);
   const [showMatchModal, setShowMatchModal] = useState(false);
-  const [countdown, setCountdown] = useState(5);
+  const [tableMatchCountdown, setTableMatchCountdown] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // Track the last table ID we auto-opened the modal for, to avoid re-opening on every render
   const autoOpenedForTableRef = useRef<string | null>(null);
@@ -89,23 +94,28 @@ export function LobbyPage() {
     }
   }, [location.state]);
 
-  // Show match modal when a game is created (from table accept)
+  // Show match modal for handshake and final match-ready state
   useEffect(() => {
-    if (matchedGameId) {
+    if (tableMatchStatus === "pending_accept" || tableMatchStatus === "matched") {
       setShowMatchModal(true);
-      setCountdown(5);
+    } else {
+      setShowMatchModal(false);
     }
-  }, [matchedGameId]);
+  }, [tableMatchStatus]);
 
-  // Auto-navigate countdown when matched
   useEffect(() => {
-    if (!showMatchModal || !matchedGameId) return;
+    if (tableMatchStatus !== "pending_accept") {
+      setTableMatchCountdown(null);
+      return;
+    }
 
+    setTableMatchCountdown(10);
     const timer = setInterval(() => {
-      setCountdown((prev) => {
+      setTableMatchCountdown((prev) => {
+        if (prev === null) return null;
         if (prev <= 1) {
           clearInterval(timer);
-          navigate(`/game/${matchedGameId}`);
+          void declineTableMatch("timeout");
           return 0;
         }
         return prev - 1;
@@ -113,7 +123,13 @@ export function LobbyPage() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [showMatchModal, matchedGameId, navigate]);
+  }, [tableMatchStatus, declineTableMatch]);
+
+  // Navigate when both accepted and game is created
+  useEffect(() => {
+    if (tableMatchStatus !== "matched" || !matchedGameId) return;
+    navigate(`/game/${matchedGameId}`);
+  }, [tableMatchStatus, matchedGameId, navigate]);
 
   const handleCreateTable = async () => {
     await createTable();
@@ -132,12 +148,6 @@ export function LobbyPage() {
   const handleAcceptRequest = async (requestId: string) => {
     await acceptRequest(requestId);
     setShowHostModal(false);
-  };
-
-  const handleJoinBattle = () => {
-    if (matchedGameId) {
-      navigate(`/game/${matchedGameId}`);
-    }
   };
 
   const canJoinTable = role === "none" && !myRequest;
@@ -240,10 +250,15 @@ export function LobbyPage() {
         loading={tableLoading}
       />
 
-      {/* Match Found Modal (from table accept) */}
+      {/* Match Found Modal (table handshake) */}
       <Modal
         isOpen={showMatchModal}
-        onClose={() => setShowMatchModal(false)}
+        onClose={() => {
+          setShowMatchModal(false);
+          if (tableMatchStatus === "pending_accept") {
+            void declineTableMatch();
+          }
+        }}
         title="Battle Stations!"
       >
         <div className="flex flex-col items-center gap-4 py-2">
@@ -258,42 +273,51 @@ export function LobbyPage() {
 
           <div className="text-center">
             <p className="text-lg font-bold text-emerald-300">
-              Game Created!
+              Opponent Located!
             </p>
             <p className="mt-1 text-sm text-slate-300">
-              Your opponent is
+              You have been matched with
             </p>
             <p className="mt-1 text-xl font-bold text-white">
               {matchedOpponent ?? "Unknown Captain"}
             </p>
           </div>
 
-          {matchedGameId && (
-            <div className="rounded-md bg-slate-800/60 px-3 py-1.5">
-              <p className="text-xs text-slate-400">
-                Game ID:{" "}
-                <span className="font-mono text-slate-300">
-                  {matchedGameId.slice(0, 8)}...
-                </span>
-              </p>
+          {tableMatchStatus === "pending_accept" && (
+            <div className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-3 py-2 text-xs text-slate-200">
+              <p>You: {acceptedByMe ? "Accepted" : "Pending"}</p>
+              <p>Opponent: {opponentAccepted ? "Accepted" : "Pending"}</p>
             </div>
           )}
 
-          <Button
-            fullWidth
-            onClick={handleJoinBattle}
-            className="bg-emerald-600 text-white hover:bg-emerald-500"
-          >
-            Join Battle ({countdown}s)
-          </Button>
+          {tableMatchStatus === "pending_accept" && tableMatchCountdown !== null && (
+            <div className="w-full rounded-md border border-emerald-500/30 bg-emerald-950/30 px-3 py-2 text-center text-xs text-emerald-200">
+              Match starts in {tableMatchCountdown}s. Both players must accept.
+            </div>
+          )}
 
-          <Button
-            fullWidth
-            variant="secondary"
-            onClick={() => setShowMatchModal(false)}
-          >
-            Return to Lobby
-          </Button>
+          {tableMatchStatus === "pending_accept" && !acceptedByMe && (
+            <Button
+              fullWidth
+              onClick={() => void acceptTableMatch()}
+              className="bg-emerald-600 text-white hover:bg-emerald-500"
+            >
+              Accept Match
+            </Button>
+          )}
+
+          {tableMatchStatus === "pending_accept" && (
+            <Button
+              fullWidth
+              variant="secondary"
+              onClick={() => {
+                setShowMatchModal(false);
+                void declineTableMatch();
+              }}
+            >
+              Decline Match
+            </Button>
+          )}
         </div>
       </Modal>
     </div>

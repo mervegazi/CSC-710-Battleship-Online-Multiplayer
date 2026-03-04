@@ -5,6 +5,7 @@ import type { Table, TableRequest } from "../types";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 type TableRole = "none" | "host" | "requester";
+type TableMatchStatus = "idle" | "pending_accept" | "matched";
 
 interface UseTableReturn {
   tables: Table[];
@@ -20,6 +21,11 @@ interface UseTableReturn {
   cancelJoinRequest: () => Promise<void>;
   acceptRequest: (requestId: string) => Promise<void>;
   rejectRequest: (requestId: string) => Promise<void>;
+  tableMatchStatus: TableMatchStatus;
+  acceptedByMe: boolean;
+  opponentAccepted: boolean;
+  acceptTableMatch: () => Promise<void>;
+  declineTableMatch: (reason?: "decline" | "timeout") => Promise<void>;
   matchedGameId: string | null;
   matchedOpponent: string | null;
 }
@@ -42,12 +48,46 @@ export function useTable(): UseTableReturn {
   const [role, setRole] = useState<TableRole>("none");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tableMatchStatus, setTableMatchStatus] = useState<TableMatchStatus>("idle");
+  const [acceptedByMe, setAcceptedByMe] = useState(false);
+  const [opponentAccepted, setOpponentAccepted] = useState(false);
   const [matchedGameId, setMatchedGameId] = useState<string | null>(null);
   const [matchedOpponent, setMatchedOpponent] = useState<string | null>(null);
 
   const tablesChannelRef = useRef<RealtimeChannel | null>(null);
   const requestsChannelRef = useRef<RealtimeChannel | null>(null);
   const myRequestChannelRef = useRef<RealtimeChannel | null>(null);
+  const tableMatchChannelRef = useRef<RealtimeChannel | null>(null);
+  const tableMatchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTableIdRef = useRef<string | null>(null);
+  const pendingRequestIdRef = useRef<string | null>(null);
+  const pendingHostIdRef = useRef<string | null>(null);
+  const pendingRequesterIdRef = useRef<string | null>(null);
+  const pendingInitiatorRef = useRef<string | null>(null);
+  const creatingGameRef = useRef(false);
+  const TABLE_MATCH_TIMEOUT_MS = 25000;
+
+  const clearTableMatchTimeout = useCallback(() => {
+    if (tableMatchTimeoutRef.current) {
+      clearTimeout(tableMatchTimeoutRef.current);
+      tableMatchTimeoutRef.current = null;
+    }
+  }, []);
+
+  const resetTableMatchState = useCallback(() => {
+    setTableMatchStatus("idle");
+    setAcceptedByMe(false);
+    setOpponentAccepted(false);
+    setMatchedGameId(null);
+    setMatchedOpponent(null);
+    pendingTableIdRef.current = null;
+    pendingRequestIdRef.current = null;
+    pendingHostIdRef.current = null;
+    pendingRequesterIdRef.current = null;
+    pendingInitiatorRef.current = null;
+    creatingGameRef.current = false;
+    clearTableMatchTimeout();
+  }, [clearTableMatchTimeout]);
 
   // Fetch all open tables with host names
   const fetchTables = useCallback(async () => {
@@ -237,6 +277,157 @@ export function useTable(): UseTableReturn {
     };
   }, [role, myRequest, user]);
 
+  const startPendingTableMatch = useCallback(
+    async (payload: {
+      tableId: string;
+      requestId: string;
+      hostId: string;
+      requesterId: string;
+      initiator: string;
+    }) => {
+      if (!user) return;
+      if (payload.hostId !== user.id && payload.requesterId !== user.id) return;
+
+      clearTableMatchTimeout();
+      pendingTableIdRef.current = payload.tableId;
+      pendingRequestIdRef.current = payload.requestId;
+      pendingHostIdRef.current = payload.hostId;
+      pendingRequesterIdRef.current = payload.requesterId;
+      pendingInitiatorRef.current = payload.initiator;
+      creatingGameRef.current = false;
+
+      const opponentId =
+        payload.hostId === user.id ? payload.requesterId : payload.hostId;
+      const opponentName = await getDisplayName(opponentId);
+
+      setMatchedOpponent(opponentName);
+      setMatchedGameId(null);
+      setAcceptedByMe(false);
+      setOpponentAccepted(false);
+      setTableMatchStatus("pending_accept");
+      setError(null);
+
+      tableMatchTimeoutRef.current = setTimeout(async () => {
+        if (pendingTableIdRef.current !== payload.tableId) return;
+        if (tableMatchStatus !== "pending_accept") return;
+
+        if (tableMatchChannelRef.current) {
+          await tableMatchChannelRef.current.send({
+            type: "broadcast",
+            event: "table-match-decline",
+            payload: {
+              tableId: payload.tableId,
+              requestId: payload.requestId,
+              declinedBy: user.id,
+              reason: "timeout",
+            },
+          });
+        }
+
+        resetTableMatchState();
+        setError("Match request expired before both players accepted.");
+      }, TABLE_MATCH_TIMEOUT_MS);
+    },
+    [clearTableMatchTimeout, resetTableMatchState, tableMatchStatus, user]
+  );
+
+  useEffect(() => {
+    if (!user) return;
+
+    const tableId = myTable?.id ?? myRequest?.table_id;
+    if (!tableId) {
+      if (tableMatchChannelRef.current) {
+        supabase.removeChannel(tableMatchChannelRef.current);
+        tableMatchChannelRef.current = null;
+      }
+      return;
+    }
+
+    if (tableMatchChannelRef.current) {
+      supabase.removeChannel(tableMatchChannelRef.current);
+      tableMatchChannelRef.current = null;
+    }
+
+    const channel = supabase
+      .channel(`table-match:${tableId}`)
+      .on("broadcast", { event: "table-match-found" }, async ({ payload }) => {
+        const data = payload as {
+          tableId: string;
+          requestId: string;
+          hostId: string;
+          requesterId: string;
+          initiator: string;
+        };
+        if (data.tableId !== tableId) return;
+        await startPendingTableMatch(data);
+      })
+      .on("broadcast", { event: "table-match-accept" }, ({ payload }) => {
+        const data = payload as { tableId: string; userId: string };
+        if (data.tableId !== pendingTableIdRef.current) return;
+        if (data.userId === user.id) return;
+        setOpponentAccepted(true);
+      })
+      .on("broadcast", { event: "table-match-decline" }, async ({ payload }) => {
+        const data = payload as {
+          tableId: string;
+          requestId: string;
+          declinedBy: string;
+          reason?: string;
+        };
+        if (data.tableId !== pendingTableIdRef.current) return;
+
+        if (user.id === pendingHostIdRef.current && data.requestId) {
+          await supabase
+            .from("table_requests")
+            .update({ status: "rejected" })
+            .eq("id", data.requestId);
+          if (pendingTableIdRef.current) {
+            await supabase
+              .from("tables")
+              .update({ status: "waiting" })
+              .eq("id", pendingTableIdRef.current);
+          }
+        }
+
+        if (user.id === pendingRequesterIdRef.current) {
+          setMyRequest(null);
+          setRole("none");
+        }
+
+        resetTableMatchState();
+        setError("The other player did not accept the match.");
+      })
+      .on("broadcast", { event: "table-match-ready" }, async ({ payload }) => {
+        const data = payload as {
+          tableId: string;
+          gameId: string;
+          opponentId: string;
+        };
+        if (data.tableId !== pendingTableIdRef.current) return;
+
+        const opponentName = await getDisplayName(data.opponentId);
+        setMatchedGameId(data.gameId);
+        setMatchedOpponent(opponentName);
+        setTableMatchStatus("matched");
+        clearTableMatchTimeout();
+
+        setMyTable(null);
+        setMyRequest(null);
+        setIncomingRequests([]);
+        setRole("none");
+      })
+      .subscribe();
+
+    tableMatchChannelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+      if (tableMatchChannelRef.current === channel) {
+        tableMatchChannelRef.current = null;
+      }
+    };
+  }, [clearTableMatchTimeout, myRequest, myTable, resetTableMatchState, startPendingTableMatch, user]);
+
   // Check if user already has an active table or request on mount
   useEffect(() => {
     if (!user) return;
@@ -410,6 +601,171 @@ export function useTable(): UseTableReturn {
     }
   }, [user, myRequest]);
 
+  const finalizeTableMatch = useCallback(async () => {
+    if (!user) return;
+    if (tableMatchStatus !== "pending_accept") return;
+    if (!acceptedByMe || !opponentAccepted) return;
+    if (creatingGameRef.current) return;
+    if (pendingInitiatorRef.current !== user.id) return;
+    if (!pendingTableIdRef.current || !pendingRequestIdRef.current) return;
+    if (!pendingHostIdRef.current || !pendingRequesterIdRef.current) return;
+
+    creatingGameRef.current = true;
+
+    try {
+      const tableId = pendingTableIdRef.current;
+      const requestId = pendingRequestIdRef.current;
+      const hostId = pendingHostIdRef.current;
+      const requesterId = pendingRequesterIdRef.current;
+
+      await supabase
+        .from("table_requests")
+        .update({ status: "accepted" })
+        .eq("id", requestId);
+
+      await supabase
+        .from("table_requests")
+        .update({ status: "rejected" })
+        .eq("table_id", tableId)
+        .eq("status", "pending")
+        .neq("id", requestId);
+
+      await supabase
+        .from("tables")
+        .update({ status: "in_game" })
+        .eq("id", tableId);
+
+      const firstPlayer = Math.random() < 0.5 ? hostId : requesterId;
+
+      const { data: game, error: gameError } = await supabase
+        .from("games")
+        .insert({
+          status: "setup",
+          current_turn: firstPlayer,
+          table_id: tableId,
+          created_by: hostId,
+        })
+        .select("id")
+        .single();
+
+      if (gameError || !game) throw new Error("Failed to create game");
+
+      await supabase.from("games_players").insert([
+        {
+          game_id: game.id,
+          player_id: hostId,
+          player_number: 1,
+          board: { ships: [] },
+          ready: false,
+        },
+        {
+          game_id: game.id,
+          player_id: requesterId,
+          player_number: 2,
+          board: { ships: [] },
+          ready: false,
+        },
+      ]);
+
+      if (tableMatchChannelRef.current) {
+        await tableMatchChannelRef.current.send({
+          type: "broadcast",
+          event: "table-match-ready",
+          payload: {
+            tableId,
+            gameId: game.id,
+            opponentId: requesterId,
+          },
+        });
+      }
+
+      const opponentName = await getDisplayName(requesterId);
+      setMatchedGameId(game.id);
+      setMatchedOpponent(opponentName);
+      setTableMatchStatus("matched");
+      clearTableMatchTimeout();
+      setMyTable(null);
+      setIncomingRequests([]);
+      setRole("none");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create match");
+      resetTableMatchState();
+    } finally {
+      creatingGameRef.current = false;
+    }
+  }, [
+    acceptedByMe,
+    opponentAccepted,
+    tableMatchStatus,
+    user,
+    clearTableMatchTimeout,
+    resetTableMatchState,
+  ]);
+
+  useEffect(() => {
+    void finalizeTableMatch();
+  }, [finalizeTableMatch]);
+
+  const acceptTableMatch = useCallback(async () => {
+    if (!user || !pendingTableIdRef.current) return;
+    if (tableMatchStatus !== "pending_accept") return;
+
+    setAcceptedByMe(true);
+
+    if (tableMatchChannelRef.current) {
+      await tableMatchChannelRef.current.send({
+        type: "broadcast",
+        event: "table-match-accept",
+        payload: {
+          tableId: pendingTableIdRef.current,
+          userId: user.id,
+        },
+      });
+    }
+  }, [tableMatchStatus, user]);
+
+  const declineTableMatch = useCallback(async (reason: "decline" | "timeout" = "decline") => {
+    if (!user || !pendingTableIdRef.current) return;
+
+    if (tableMatchChannelRef.current) {
+      await tableMatchChannelRef.current.send({
+        type: "broadcast",
+        event: "table-match-decline",
+        payload: {
+          tableId: pendingTableIdRef.current,
+          requestId: pendingRequestIdRef.current,
+          declinedBy: user.id,
+          reason,
+        },
+      });
+    }
+
+    if (user.id === pendingRequesterIdRef.current && pendingRequestIdRef.current) {
+      await supabase
+        .from("table_requests")
+        .delete()
+        .eq("id", pendingRequestIdRef.current);
+      setMyRequest(null);
+      setRole("none");
+    }
+
+    if (user.id === pendingHostIdRef.current && pendingRequestIdRef.current) {
+      await supabase
+        .from("table_requests")
+        .update({ status: "rejected" })
+        .eq("id", pendingRequestIdRef.current);
+      if (pendingTableIdRef.current) {
+        await supabase
+          .from("tables")
+          .update({ status: "waiting" })
+          .eq("id", pendingTableIdRef.current);
+      }
+    }
+
+    resetTableMatchState();
+    setError(reason === "timeout" ? "Match request expired." : "You declined the match.");
+  }, [resetTableMatchState, user]);
+
   const acceptRequest = useCallback(
     async (requestId: string) => {
       if (!user || !myTable) return;
@@ -421,68 +777,32 @@ export function useTable(): UseTableReturn {
         const request = incomingRequests.find((r) => r.id === requestId);
         if (!request) throw new Error("Request not found");
 
-        // Accept the request
-        await supabase
-          .from("table_requests")
-          .update({ status: "accepted" })
-          .eq("id", requestId);
+        await startPendingTableMatch({
+          tableId: myTable.id,
+          requestId: request.id,
+          hostId: user.id,
+          requesterId: request.requester_id,
+          initiator: user.id,
+        });
 
-        // Reject all other pending requests
-        await supabase
-          .from("table_requests")
-          .update({ status: "rejected" })
-          .eq("table_id", myTable.id)
-          .eq("status", "pending")
-          .neq("id", requestId);
-
-        // Update table status
         await supabase
           .from("tables")
-          .update({ status: "in_game" })
+          .update({ status: "full" })
           .eq("id", myTable.id);
 
-        // Create the game
-        const firstPlayer =
-          Math.random() < 0.5 ? user.id : request.requester_id;
-
-        const { data: game, error: gameError } = await supabase
-          .from("games")
-          .insert({
-            status: "setup",
-            current_turn: firstPlayer,
-            table_id: myTable.id,
-            created_by: user.id,
-          })
-          .select("id")
-          .single();
-
-        if (gameError || !game) throw new Error("Failed to create game");
-
-        await supabase.from("games_players").insert([
-          {
-            game_id: game.id,
-            player_id: user.id,
-            player_number: 1,
-            board: { ships: [] },
-            ready: false,
-          },
-          {
-            game_id: game.id,
-            player_id: request.requester_id,
-            player_number: 2,
-            board: { ships: [] },
-            ready: false,
-          },
-        ]);
-
-        const opponentName =
-          request.requester_name ?? (await getDisplayName(request.requester_id));
-
-        setMatchedGameId(game.id);
-        setMatchedOpponent(opponentName);
-        setMyTable(null);
-        setRole("none");
-        setIncomingRequests([]);
+        if (tableMatchChannelRef.current) {
+          await tableMatchChannelRef.current.send({
+            type: "broadcast",
+            event: "table-match-found",
+            payload: {
+              tableId: myTable.id,
+              requestId: request.id,
+              hostId: user.id,
+              requesterId: request.requester_id,
+              initiator: user.id,
+            },
+          });
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to accept request"
@@ -491,7 +811,7 @@ export function useTable(): UseTableReturn {
         setLoading(false);
       }
     },
-    [user, myTable, incomingRequests]
+    [user, myTable, incomingRequests, startPendingTableMatch]
   );
 
   const rejectRequest = useCallback(
@@ -517,14 +837,18 @@ export function useTable(): UseTableReturn {
   // Cleanup on unmount: close table if hosting
   useEffect(() => {
     return () => {
+      clearTableMatchTimeout();
       if (requestsChannelRef.current) {
         supabase.removeChannel(requestsChannelRef.current);
       }
       if (myRequestChannelRef.current) {
         supabase.removeChannel(myRequestChannelRef.current);
       }
+      if (tableMatchChannelRef.current) {
+        supabase.removeChannel(tableMatchChannelRef.current);
+      }
     };
-  }, []);
+  }, [clearTableMatchTimeout]);
 
   return {
     tables,
@@ -540,6 +864,11 @@ export function useTable(): UseTableReturn {
     cancelJoinRequest,
     acceptRequest,
     rejectRequest,
+    tableMatchStatus,
+    acceptedByMe,
+    opponentAccepted,
+    acceptTableMatch,
+    declineTableMatch,
     matchedGameId,
     matchedOpponent,
   };

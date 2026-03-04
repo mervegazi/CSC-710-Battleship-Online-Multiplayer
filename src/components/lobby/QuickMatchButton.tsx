@@ -63,7 +63,7 @@ export function QuickMatchButton({ onStatusChange, onlineUserIds }: QuickMatchBu
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [status, acceptedByMe, opponentAccepted, finalizeMatch, expirePendingMatch]);
+  }, [status, expirePendingMatch]);
 
   useEffect(() => {
     if (status !== "pending_accept") return;
