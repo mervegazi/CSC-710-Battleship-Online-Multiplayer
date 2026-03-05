@@ -91,6 +91,11 @@ export function LobbyPage() {
     const state = location.state as { notice?: string } | null;
     if (state?.notice) {
       setNotice(state.notice);
+      // Clear the navigation state so the notice doesn't reappear on refresh
+      window.history.replaceState({}, "");
+      // Auto-dismiss after 5 seconds
+      const timer = setTimeout(() => setNotice(null), 5000);
+      return () => clearTimeout(timer);
     }
   }, [location.state]);
 
