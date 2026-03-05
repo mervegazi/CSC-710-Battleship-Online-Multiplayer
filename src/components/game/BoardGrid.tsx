@@ -42,7 +42,7 @@ export function BoardGrid({
 
             {/* Responsive wrapper — full-size boards */}
             <div
-                className="w-full px-2 sm:px-0"
+                className="w-full px-3 sm:px-0"
                 style={{ maxWidth: "min(90vw, 500px)" }}
             >
                 <div
