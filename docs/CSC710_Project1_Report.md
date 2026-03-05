@@ -709,49 +709,49 @@ Project 2 will extend this Battleship project as a **Brownfield Development** ef
 
 ### 14.1 Landing Page
 
-![Landing Page](./screenshots/landing-page.png)
+![Landing Page](https://raw.githubusercontent.com/mervegazi/CSC-710-Battleship-Online-Multiplayer/main/docs/screenshots/landing-page.png)
 
 Dark navy blue theme with "Battleship Online" title, "Play Now" and "Sign In" call-to-action buttons.
 
 ### 14.2 Login Page
 
-![Login Page](./screenshots/login-page.png)
+![Login Page](https://raw.githubusercontent.com/mervegazi/CSC-710-Battleship-Online-Multiplayer/main/docs/screenshots/login-page.png)
 
 "Welcome Back" login form with email and password fields.
 
 ### 14.3 Register Page
 
-![Register Page](./screenshots/register-page.png)
+![Register Page](https://raw.githubusercontent.com/mervegazi/CSC-710-Battleship-Online-Multiplayer/main/docs/screenshots/register-page.png)
 
 "Create Account" form with display name, email, password, and confirm password fields.
 
 ### 14.4 Lobby (Chat + Online Users + Tables)
 
-![Lobby](./screenshots/lobby-page.png)
+![Lobby](https://raw.githubusercontent.com/mervegazi/CSC-710-Battleship-Online-Multiplayer/main/docs/screenshots/lobby-page.png)
 
 Full lobby view showing online player count, Quick Match button, open tables list, and real-time lobby chat panel.
 
 ### 14.5 Ship Placement Phase (Empty Board)
 
-![Ship Placement - Empty](./screenshots/game-ship-placement-empty.png)
+![Ship Placement - Empty](https://raw.githubusercontent.com/mervegazi/CSC-710-Battleship-Online-Multiplayer/main/docs/screenshots/game-ship-placement-empty.png)
 
 Game setup screen showing two empty 10x10 grids, alternating ship placement panel with all ships unplaced.
 
 ### 14.6 Ship Placement Phase (In Progress)
 
-![Ship Placement - In Progress](./screenshots/game-ship-placement-in-progress.png)
+![Ship Placement - In Progress](https://raw.githubusercontent.com/mervegazi/CSC-710-Battleship-Online-Multiplayer/main/docs/screenshots/game-ship-placement-in-progress.png)
 
 Ships being placed with SVG visuals — Destroyer and Submarine placed, Cruiser selected as current turn.
 
 ### 14.7 Game End — Victory Screen
 
-![Game End - Victory](./screenshots/game-end-victory-modal.png)
+![Game End - Victory](https://raw.githubusercontent.com/mervegazi/CSC-710-Battleship-Online-Multiplayer/main/docs/screenshots/game-end-victory-modal.png)
 
 Victory modal overlay showing battle statistics: 9 moves, 6 hits, 3 misses, 67% accuracy. Both boards visible in background with hit/miss markers.
 
 ### 14.8 Profile Page
 
-![Profile Page](./screenshots/profile-page.png)
+![Profile Page](https://raw.githubusercontent.com/mervegazi/CSC-710-Battleship-Online-Multiplayer/main/docs/screenshots/profile-page.png)
 
 Player profile card displaying display name, email, games played (10), wins (4), and losses (6).
 
