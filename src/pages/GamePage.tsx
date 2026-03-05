@@ -580,7 +580,7 @@ export function GamePage() {
         </div>
 
         {/* ── Desktop: side-by-side boards ── */}
-        <div className="hidden md:grid md:grid-cols-2 gap-4 place-items-center flex-1 min-h-0">
+        <div className="hidden md:grid md:grid-cols-2 gap-6 place-items-center flex-1 min-h-0 overflow-y-auto">
           <BoardGrid
             cells={myDisplayBoard}
             interactive={isMyPlacementTurn}
@@ -601,7 +601,7 @@ export function GamePage() {
         </div>
 
         {/* ── Mobile: tabbed single board ── */}
-        <div className="md:hidden place-items-center flex-1 min-h-0 flex flex-col justify-center">
+        <div className="md:hidden flex-1 min-h-0 overflow-y-auto flex flex-col items-center justify-start py-2">
           {mobileTab === "my" ? (
             <BoardGrid
               cells={myDisplayBoard}

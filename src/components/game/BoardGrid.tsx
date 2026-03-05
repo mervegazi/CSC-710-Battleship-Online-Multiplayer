@@ -33,17 +33,17 @@ export function BoardGrid({
     title,
 }: BoardGridProps) {
     return (
-        <div className="flex flex-col items-center gap-1 w-full min-h-0">
+        <div className="flex flex-col items-center gap-2 w-full">
             {title && (
-                <h2 className="text-xs sm:text-sm font-semibold text-slate-200 tracking-wide uppercase shrink-0">
+                <h2 className="text-sm sm:text-base font-semibold text-slate-200 tracking-wide uppercase">
                     {title}
                 </h2>
             )}
 
-            {/* Responsive wrapper — scales to fit available space */}
+            {/* Responsive wrapper — full-size boards */}
             <div
-                className="w-full px-2 sm:px-0 min-h-0 flex items-center justify-center"
-                style={{ maxWidth: "min(85vw, 500px)" }}
+                className="w-full px-2 sm:px-0"
+                style={{ maxWidth: "min(90vw, 500px)" }}
             >
                 <div
                     className="grid gap-[2px] sm:gap-1"
