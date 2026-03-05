@@ -35,7 +35,6 @@ export function GamePage() {
   const [leavingMatch, setLeavingMatch] = useState(false);
   const [showOpponentLeftPopup, setShowOpponentLeftPopup] = useState(false);
   const [turnLockedShipSize, setTurnLockedShipSize] = useState<number | null>(null);
-  const [mobileTab, setMobileTab] = useState<"my" | "enemy">("my");
   const wasMyPlacementTurnRef = useRef(false);
 
   const {
@@ -358,8 +357,8 @@ export function GamePage() {
   };
 
   return (
-    <main className="h-dvh bg-slate-950 text-slate-100 overflow-hidden flex flex-col">
-      <div className="mx-auto flex w-full max-w-5xl flex-col flex-1 min-h-0 gap-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4">
+    <main className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
         <div className="flex items-center justify-between">
           <h1 className="text-lg sm:text-2xl font-bold flex items-center gap-2">
             {loading ? (
@@ -432,7 +431,7 @@ export function GamePage() {
         )}
 
         {isSetup && !isReady && (
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-3 sm:p-4 overflow-y-auto max-h-[30vh] shrink-0">
+          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
               Alternating Ship Placement
             </h2>
@@ -555,32 +554,7 @@ export function GamePage() {
           </section>
         )}
 
-        {/* ── Mobile Tab Switcher (visible only on small screens) ── */}
-        <div className="flex md:hidden rounded-lg border border-slate-700 bg-slate-900 p-1 gap-1">
-          <button
-            type="button"
-            onClick={() => setMobileTab("my")}
-            className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${mobileTab === "my"
-              ? "bg-blue-600 text-white shadow"
-              : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-              }`}
-          >
-            🛳️ My Board
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobileTab("enemy")}
-            className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${mobileTab === "enemy"
-              ? "bg-red-600 text-white shadow"
-              : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-              }`}
-          >
-            🎯 Enemy Board
-          </button>
-        </div>
-
-        {/* ── Desktop: side-by-side boards ── */}
-        <div className="hidden md:grid md:grid-cols-2 gap-6 place-items-center flex-1 min-h-0 overflow-y-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 place-items-center">
           <BoardGrid
             cells={myDisplayBoard}
             interactive={isMyPlacementTurn}
@@ -598,30 +572,6 @@ export function GamePage() {
             onCellClick={handleOpponentCellClick}
             title={opponentInfo?.displayName ?? "Opponent's Waters"}
           />
-        </div>
-
-        {/* ── Mobile: tabbed single board ── */}
-        <div className="md:hidden flex-1 min-h-0 overflow-y-auto flex flex-col items-center justify-start py-2">
-          {mobileTab === "my" ? (
-            <BoardGrid
-              cells={myDisplayBoard}
-              interactive={isMyPlacementTurn}
-              onCellClick={handleMyBoardCellClick}
-              onCellDrop={handleMyBoardCellDrop}
-              onCellDragOver={handleMyBoardCellDragOver}
-              onCellDragStart={handleMyBoardCellDragStart}
-              onCellDragEnd={handleMyBoardCellDragEnd}
-              previewMap={isMyPlacementTurn ? previewMap : undefined}
-              title={myInfo?.displayName ?? "Your Fleet"}
-            />
-          ) : (
-            <BoardGrid
-              cells={gameBoardOpp}
-              interactive={isMyTurn}
-              onCellClick={handleOpponentCellClick}
-              title={opponentInfo?.displayName ?? "Opponent's Waters"}
-            />
-          )}
         </div>
 
         <div className="flex flex-wrap justify-center gap-4 text-[10px] sm:text-xs text-slate-400">
