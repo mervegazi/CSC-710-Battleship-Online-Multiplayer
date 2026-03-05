@@ -358,8 +358,8 @@ export function GamePage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
+    <main className="h-dvh bg-slate-950 text-slate-100 overflow-hidden flex flex-col">
+      <div className="mx-auto flex w-full max-w-5xl flex-col flex-1 min-h-0 gap-2 px-4 py-3 sm:gap-3 sm:px-6 sm:py-4">
         <div className="flex items-center justify-between">
           <h1 className="text-lg sm:text-2xl font-bold flex items-center gap-2">
             {loading ? (
@@ -432,7 +432,7 @@ export function GamePage() {
         )}
 
         {isSetup && !isReady && (
-          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
+          <section className="rounded-xl border border-slate-800 bg-slate-900 p-3 sm:p-4 overflow-y-auto max-h-[30vh] shrink-0">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
               Alternating Ship Placement
             </h2>
@@ -561,8 +561,8 @@ export function GamePage() {
             type="button"
             onClick={() => setMobileTab("my")}
             className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${mobileTab === "my"
-                ? "bg-blue-600 text-white shadow"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              ? "bg-blue-600 text-white shadow"
+              : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
               }`}
           >
             🛳️ My Board
@@ -571,8 +571,8 @@ export function GamePage() {
             type="button"
             onClick={() => setMobileTab("enemy")}
             className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${mobileTab === "enemy"
-                ? "bg-red-600 text-white shadow"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              ? "bg-red-600 text-white shadow"
+              : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
               }`}
           >
             🎯 Enemy Board
@@ -580,7 +580,7 @@ export function GamePage() {
         </div>
 
         {/* ── Desktop: side-by-side boards ── */}
-        <div className="hidden md:grid md:grid-cols-2 gap-10 place-items-center">
+        <div className="hidden md:grid md:grid-cols-2 gap-4 place-items-center flex-1 min-h-0">
           <BoardGrid
             cells={myDisplayBoard}
             interactive={isMyPlacementTurn}
@@ -601,7 +601,7 @@ export function GamePage() {
         </div>
 
         {/* ── Mobile: tabbed single board ── */}
-        <div className="md:hidden place-items-center">
+        <div className="md:hidden place-items-center flex-1 min-h-0 flex flex-col justify-center">
           {mobileTab === "my" ? (
             <BoardGrid
               cells={myDisplayBoard}
