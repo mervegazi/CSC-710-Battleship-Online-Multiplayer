@@ -248,6 +248,8 @@ export function BoardGrid({
                                 key={`ship-${idx}`}
                                 className="pointer-events-none z-10"
                                 style={{
+                                    position: "absolute",
+                                    inset: 0,
                                     gridRow: ship.orientation === "v"
                                         ? `${gridRowStart} / span ${ship.length}`
                                         : `${gridRowStart} / span 1`,
