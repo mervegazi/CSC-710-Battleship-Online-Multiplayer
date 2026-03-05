@@ -511,8 +511,8 @@ export function useGame(gameId: string | undefined): UseGameReturn {
 
         const moveNumber = (maxRow?.move_number ?? 0) + 1;
 
-        // INSERT move
-        const { error: moveError } = await supabase.from("moves").insert({
+        // INSERT move (upsert to ignore race-condition duplicates)
+        const { error: moveError } = await supabase.from("moves").upsert({
           game_id: gameId,
           player_id: user.id,
           x: col,
@@ -520,7 +520,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
           result,
           sunk_ship: sunkShip?.type ?? null,
           move_number: moveNumber,
-        });
+        }, { onConflict: "game_id,player_id,x,y", ignoreDuplicates: true });
 
         if (moveError) throw new Error(moveError.message);
 
