@@ -76,10 +76,21 @@ export function BoardGrid({
                             {/* Data cells */}
                             {COL_LABELS.map((colLabel, colIdx) => {
                                 const cellState = cells[rowIdx][colIdx];
+
+                                // Compute ship segment neighbors for connected ship rendering
+                                const isShipCell = cellState === "ship";
+                                const shipSegment = isShipCell ? {
+                                    top: rowIdx > 0 && cells[rowIdx - 1][colIdx] === "ship",
+                                    bottom: rowIdx < 9 && cells[rowIdx + 1][colIdx] === "ship",
+                                    left: colIdx > 0 && cells[rowIdx][colIdx - 1] === "ship",
+                                    right: colIdx < 9 && cells[rowIdx][colIdx + 1] === "ship",
+                                } : undefined;
+
                                 return <BoardCell
                                     key={`${rowIdx}-${colIdx}`}
                                     state={cellState}
                                     label={`${colLabel}${rowLabel}`}
+                                    shipSegment={shipSegment}
                                     onClick={
                                         interactive && onCellClick
                                             ? () => onCellClick(rowIdx, colIdx)
