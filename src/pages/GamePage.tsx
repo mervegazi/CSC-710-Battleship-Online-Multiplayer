@@ -154,8 +154,18 @@ export function GamePage() {
     const myMoves = gameMoves.filter((m) => m.player_id === user.id);
     const hits = myMoves.filter((m) => m.result === "hit" || m.result === "sunk").length;
     const misses = myMoves.filter((m) => m.result === "miss").length;
-    const totalShips = myPlayer?.board?.ships?.length ?? 0;
-    const shipsLost = myPlayer?.board?.ships?.filter((s) => s.sunk).length ?? 0;
+    const totalShips = opponentPlayer?.board?.ships?.length ?? gameShipCount ?? shipCount;
+    const sunkMoves = myMoves.filter((m) => m.result === "sunk");
+    const sunkTypes = new Set<string>();
+    let sunkFallbackCount = 0;
+    for (const move of sunkMoves) {
+      if (move.sunk_ship) {
+        sunkTypes.add(move.sunk_ship);
+      } else {
+        sunkFallbackCount += 1;
+      }
+    }
+    const shipsLost = sunkTypes.size + sunkFallbackCount;
     return {
       totalMoves: myMoves.length,
       hits,

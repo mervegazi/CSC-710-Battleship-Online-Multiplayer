@@ -57,7 +57,7 @@ export function GameEndModal({
             </div>
             <div className="flex flex-col items-center">
               <span className="text-lg font-bold text-red-400">{stats.shipsLost}/{stats.totalShips}</span>
-              <span className="text-xs text-slate-400">Ships Lost</span>
+              <span className="text-xs text-slate-400">Ships Sank</span>
             </div>
           </div>
         )}
