@@ -36,6 +36,7 @@ export function GamePage() {
   const [showOpponentLeftPopup, setShowOpponentLeftPopup] = useState(false);
   const [turnLockedShipSize, setTurnLockedShipSize] = useState<number | null>(null);
   const [mobileTab, setMobileTab] = useState<"my" | "enemy">("my");
+  const [localPlacementDirty, setLocalPlacementDirty] = useState(false);
   const wasMyPlacementTurnRef = useRef(false);
 
   const {
@@ -175,9 +176,17 @@ export function GamePage() {
 
   useEffect(() => {
     if (!myPlayer) return;
+    const serverPlacedCount = myPlayer.board?.ships?.length ?? 0;
+
+    // Avoid overwriting local, unsaved placements with stale server state.
+    if (isMyPlacementTurn && localPlacementDirty && serverPlacedCount < myPlacedCount) {
+      return;
+    }
+
     const hydrated = hydrateFleetFromBoard(shipCount, myPlayer.board);
     setFleet(hydrated);
-  }, [myPlayer, shipCount]);
+    setLocalPlacementDirty(false);
+  }, [myPlayer, shipCount, isMyPlacementTurn, myPlacedCount, localPlacementDirty]);
 
   useEffect(() => {
     if (!activeShip) return;
@@ -253,6 +262,7 @@ export function GamePage() {
         s.id === ship.id ? { ...s, orientation, cells: candidateCells } : s
       )
     );
+    setLocalPlacementDirty(true);
 
     setPlacementError(null);
   };
@@ -324,6 +334,7 @@ export function GamePage() {
       setPlacementError(null);
       setPreviewMap({});
       setDraggedShipId(null);
+      setLocalPlacementDirty(false);
     } catch {
       setPlacementError("Failed to end turn. Please try again.");
     } finally {
