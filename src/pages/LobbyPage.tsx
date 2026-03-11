@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useAuth } from "../hooks/useAuth";
+import { soundService } from "../lib/soundService";
 import { useLobby } from "../hooks/useLobby";
 import { useTable } from "../hooks/useTable";
 import { LobbyHeader } from "../components/lobby/LobbyHeader";
@@ -49,6 +50,11 @@ export function LobbyPage() {
   const [notice, setNotice] = useState<string | null>(null);
   // Track the last table ID we auto-opened the modal for, to avoid re-opening on every render
   const autoOpenedForTableRef = useRef<string | null>(null);
+
+  // Preload sounds on lobby mount
+  useEffect(() => {
+    void soundService.preload();
+  }, []);
 
   // Update presence status when matchmaking state changes
   const handleMatchmakingStatusChange = useCallback(
@@ -103,6 +109,9 @@ export function LobbyPage() {
   useEffect(() => {
     if (tableMatchStatus === "pending_accept" || tableMatchStatus === "matched") {
       setShowMatchModal(true);
+      if (tableMatchStatus === "pending_accept") {
+        soundService.play("match_found");
+      }
     } else {
       setShowMatchModal(false);
     }

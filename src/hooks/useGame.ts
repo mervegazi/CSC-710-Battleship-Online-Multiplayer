@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import { soundService } from "../lib/soundService";
 import { useAuth } from "./useAuth";
 import { useHeartbeat } from "./useHeartbeat";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -194,6 +195,14 @@ export function useGame(gameId: string | undefined): UseGameReturn {
             if (prev.some((m) => m.id === newMove.id)) return prev;
             return [...prev, newMove];
           });
+          // Play incoming sound for opponent's move only
+          if (newMove.player_id !== currentUserId) {
+            if (newMove.result === "miss") {
+              soundService.play("splash_incoming");
+            } else {
+              soundService.play("hit_incoming");
+            }
+          }
         }
       )
       // Game state changes (current_turn, status, winner_id)
@@ -498,6 +507,15 @@ export function useGame(gameId: string | undefined): UseGameReturn {
         row,  // y = row
         myPreviousMoves
       );
+
+      // Immediate audio feedback (before async DB calls)
+      if (sunkShip) {
+        soundService.play("sunk");
+      } else if (result === "hit") {
+        soundService.play("explosion");
+      } else {
+        soundService.play("splash");
+      }
 
       try {
         // Fetch current max move_number from DB to avoid race conditions

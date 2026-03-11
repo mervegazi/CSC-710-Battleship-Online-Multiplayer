@@ -1,5 +1,6 @@
 import { useAuth } from "../../hooks/useAuth";
 import { Button } from "../common/Button";
+import { SoundToggle } from "../common/SoundToggle";
 import { Link } from "react-router";
 
 export function LobbyHeader() {
@@ -29,6 +30,7 @@ export function LobbyHeader() {
         </span>
       </div>
       <div className="flex items-center gap-3">
+        <SoundToggle />
         <Link
           to="/profile"
           className="text-sm text-slate-400 transition-colors hover:text-slate-200"
