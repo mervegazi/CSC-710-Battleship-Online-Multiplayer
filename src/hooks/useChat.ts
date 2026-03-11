@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import { soundService } from "../lib/soundService";
 import { useAuth } from "./useAuth";
 import type { ChatMessage } from "../types";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -110,6 +111,11 @@ export function useChat(channel = "lobby"): UseChatReturn {
                         const newMsg = payload.new as ChatMessage;
                         // Client-side filtering
                         if (newMsg.channel !== channel) return;
+
+                        // Play sound for incoming messages from others
+                        if (newMsg.sender_id !== user?.id && !newMsg.id.startsWith(OPTIMISTIC_PREFIX)) {
+                          soundService.play("chat_receive");
+                        }
 
                         setMessages((prev) => {
                             // Avoid exact-ID duplicates (e.g. duplicate Realtime events)

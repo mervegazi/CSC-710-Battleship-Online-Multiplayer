@@ -4,8 +4,10 @@ import { BoardGrid } from "../components/game/BoardGrid";
 import { TurnIndicator } from "../components/game/TurnIndicator";
 import { GameEndModal } from "../components/game/GameEndModal";
 import type { GameStats } from "../components/game/GameEndModal";
+import { SoundToggle } from "../components/common/SoundToggle";
 import { useAuth } from "../hooks/useAuth";
 import { useGame } from "../hooks/useGame";
+import { soundService } from "../lib/soundService";
 import type { Orientation } from "../types";
 import {
   MAX_SHIP_COUNT,
@@ -38,6 +40,8 @@ export function GamePage() {
   const [mobileTab, setMobileTab] = useState<"my" | "enemy">("my");
   const [localPlacementDirty, setLocalPlacementDirty] = useState(false);
   const wasMyPlacementTurnRef = useRef(false);
+  const prevIsMyTurnRef = useRef(false);
+  const gameEndSoundPlayedRef = useRef(false);
 
   const {
     gameStatus,
@@ -213,6 +217,21 @@ export function GamePage() {
     wasMyPlacementTurnRef.current = isMyPlacementTurn;
   }, [isMyPlacementTurn, nextPlacementSize]);
 
+  // Sound: your turn notification
+  useEffect(() => {
+    if (isMyTurn && !prevIsMyTurnRef.current && isPlaying) {
+      soundService.play("your_turn");
+    }
+    prevIsMyTurnRef.current = isMyTurn;
+  }, [isMyTurn, isPlaying]);
+
+  // Sound: victory / defeat
+  useEffect(() => {
+    if (!isFinished || !user || gameEndSoundPlayedRef.current) return;
+    gameEndSoundPlayedRef.current = true;
+    soundService.play(winnerId === user.id ? "victory" : "defeat");
+  }, [isFinished, winnerId, user]);
+
   useEffect(() => {
     if (gameStatus !== "abandoned" || !user) return;
     if (leavingMatch) return;
@@ -273,6 +292,7 @@ export function GamePage() {
       )
     );
     setLocalPlacementDirty(true);
+    soundService.play("ship_placed");
 
     setPlacementError(null);
   };
@@ -402,14 +422,17 @@ export function GamePage() {
               </>
             )}
           </h1>
-          <button
-            type="button"
-            onClick={handleLeaveMatch}
-            disabled={leavingMatch}
-            className="text-sm text-blue-400 hover:text-blue-300 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {leavingMatch ? "Leaving..." : "Back to Lobby"}
-          </button>
+          <div className="flex items-center gap-2">
+            <SoundToggle />
+            <button
+              type="button"
+              onClick={handleLeaveMatch}
+              disabled={leavingMatch}
+              className="text-sm text-blue-400 hover:text-blue-300 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {leavingMatch ? "Leaving..." : "Back to Lobby"}
+            </button>
+          </div>
         </div>
 
         {connectionStatus === "disconnected" && (

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { Button } from "../common/Button";
 import { Modal } from "../common/Modal";
 import { useMatchmaking } from "../../hooks/useMatchmaking";
+import { soundService } from "../../lib/soundService";
 
 interface QuickMatchButtonProps {
   onStatusChange?: (status: string) => void;
@@ -32,6 +33,7 @@ export function QuickMatchButton({ onStatusChange, onlineUserIds }: QuickMatchBu
   useEffect(() => {
     if (status === "pending_accept") {
       setShowMatchModal(true);
+      soundService.play("match_found");
     } else {
       setShowMatchModal(false);
     }
