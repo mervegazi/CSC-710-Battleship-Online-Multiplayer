@@ -5,6 +5,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { LobbyPage } from "./pages/LobbyPage";
 import { GamePage } from "./pages/GamePage";
+import { BotGamePage } from "./pages/BotGamePage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { ProtectedRoute } from "./components/common/ProtectedRoute";
 
@@ -45,6 +46,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <GamePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/bot"
+          element={
+            <ProtectedRoute>
+              <BotGamePage />
             </ProtectedRoute>
           }
         />

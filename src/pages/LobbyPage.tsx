@@ -155,6 +155,10 @@ export function LobbyPage() {
     setShowHostModal(false);
   };
 
+  const handleBotMatch = (difficulty: "easy" | "medium" | "hard") => {
+    navigate(`/bot?difficulty=${difficulty}`);
+  };
+
   const canJoinTable = role === "none" && !myRequest;
 
   return (
@@ -196,6 +200,27 @@ export function LobbyPage() {
                 onCreateTable={handleCreateTable}
                 onViewTable={() => setShowHostModal(true)}
               />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Play vs Bot
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Start a solo match against an AI opponent.
+            </p>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {(["easy", "medium", "hard"] as const).map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => handleBotMatch(level)}
+                  className="rounded-md border border-slate-700 bg-slate-800 px-2 py-2 text-xs font-semibold text-slate-200 transition-colors hover:border-slate-500 hover:bg-slate-700"
+                >
+                  {level[0].toUpperCase() + level.slice(1)}
+                </button>
+              ))}
             </div>
           </div>
 
