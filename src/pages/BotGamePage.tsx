@@ -37,32 +37,18 @@ const BOT_LABELS: Record<string, string> = {
 
 // ── Bot AI helpers ──────────────────────────────────────────
 
-/** Easy: pick a purely random un-attacked cell */
-function chooseEasyTarget(prevMoves: Move[]): { x: number; y: number } {
-  const attacked = new Set(prevMoves.map((m) => `${m.x},${m.y}`));
-  const available: { x: number; y: number }[] = [];
-  for (let y = 0; y < 10; y++) {
-    for (let x = 0; x < 10; x++) {
-      if (!attacked.has(`${x},${y}`)) available.push({ x, y });
-    }
-  }
-  return available[Math.floor(Math.random() * available.length)];
+interface AnalyzedMoves {
+  attacked: Set<string>;
+  activeHits: Move[];
 }
 
-/**
- * Medium: hunt / target strategy.
- *  – Hunt mode  → random cell (like easy)
- *  – Target mode → when there are unsunk hits, try adjacent cells;
- *                  if hits form a line, extend the line first.
- */
-function chooseMediumTarget(prevMoves: Move[]): { x: number; y: number } {
+/** Shared: classify previous moves into attacked cells and unsunk active hits. */
+function analyzeMoves(prevMoves: Move[]): AnalyzedMoves {
   const attacked = new Set(prevMoves.map((m) => `${m.x},${m.y}`));
-
   const hitCells = prevMoves.filter((m) => m.result === "hit");
   const sunkCells = prevMoves.filter((m) => m.result === "sunk");
 
   // Mark cells belonging to already-sunk ships as resolved.
-  // From each sunk cell, trace consecutive hit neighbours in every direction.
   const resolved = new Set<string>();
   for (const s of sunkCells) {
     resolved.add(`${s.x},${s.y}`);
@@ -77,81 +63,200 @@ function chooseMediumTarget(prevMoves: Move[]): { x: number; y: number } {
     }
   }
 
-  const activeHits = hitCells.filter((h) => !resolved.has(`${h.x},${h.y}`));
+  return {
+    attacked,
+    activeHits: hitCells.filter((h) => !resolved.has(`${h.x},${h.y}`)),
+  };
+}
 
-  if (activeHits.length > 0) {
-    // If 2+ collinear contiguous hits, extend the line from its endpoints
-    if (activeHits.length >= 2) {
-      const sorted = [...activeHits].sort((a, b) =>
-        a.x !== b.x ? a.x - b.x : a.y - b.y
-      );
-      const dx = Math.sign(sorted[1].x - sorted[0].x);
-      const dy = Math.sign(sorted[1].y - sorted[0].y);
+/**
+ * Shared target-mode logic used by medium and hard.
+ * If active hits form a line, extend it; otherwise try adjacent cells.
+ * Returns null when no targeting candidate is found (→ fall back to hunt).
+ */
+function targetActiveHits(
+  { attacked, activeHits }: AnalyzedMoves,
+): { x: number; y: number } | null {
+  if (activeHits.length === 0) return null;
 
-      let isLine = Math.abs(dx) + Math.abs(dy) === 1;
-      if (isLine) {
-        for (let i = 1; i < sorted.length; i++) {
-          if (
-            sorted[i].x !== sorted[i - 1].x + dx ||
-            sorted[i].y !== sorted[i - 1].y + dy
-          ) {
-            isLine = false;
-            break;
-          }
-        }
-      }
+  // If 2+ collinear contiguous hits, extend the line from its endpoints
+  if (activeHits.length >= 2) {
+    const sorted = [...activeHits].sort((a, b) =>
+      a.x !== b.x ? a.x - b.x : a.y - b.y
+    );
+    const dx = Math.sign(sorted[1].x - sorted[0].x);
+    const dy = Math.sign(sorted[1].y - sorted[0].y);
 
-      if (isLine) {
-        const first = sorted[0];
-        const last = sorted[sorted.length - 1];
-        const ends = [
-          { x: first.x - dx, y: first.y - dy },
-          { x: last.x + dx, y: last.y + dy },
-        ].filter(
-          (c) =>
-            c.x >= 0 && c.x < 10 && c.y >= 0 && c.y < 10 &&
-            !attacked.has(`${c.x},${c.y}`)
-        );
-        if (ends.length > 0) {
-          return ends[Math.floor(Math.random() * ends.length)];
-        }
-      }
-    }
-
-    // Otherwise try every neighbour of every active hit
-    const seen = new Set<string>();
-    const candidates: { x: number; y: number }[] = [];
-    for (const hit of activeHits) {
-      for (const [dx, dy] of DIRS) {
-        const nx = hit.x + dx;
-        const ny = hit.y + dy;
-        const key = `${nx},${ny}`;
+    let isLine = Math.abs(dx) + Math.abs(dy) === 1;
+    if (isLine) {
+      for (let i = 1; i < sorted.length; i++) {
         if (
-          nx >= 0 && nx < 10 && ny >= 0 && ny < 10 &&
-          !attacked.has(key) && !seen.has(key)
+          sorted[i].x !== sorted[i - 1].x + dx ||
+          sorted[i].y !== sorted[i - 1].y + dy
         ) {
-          seen.add(key);
-          candidates.push({ x: nx, y: ny });
+          isLine = false;
+          break;
         }
       }
     }
 
-    if (candidates.length > 0) {
-      return candidates[Math.floor(Math.random() * candidates.length)];
+    if (isLine) {
+      const first = sorted[0];
+      const last = sorted[sorted.length - 1];
+      const ends = [
+        { x: first.x - dx, y: first.y - dy },
+        { x: last.x + dx, y: last.y + dy },
+      ].filter(
+        (c) =>
+          c.x >= 0 && c.x < 10 && c.y >= 0 && c.y < 10 &&
+          !attacked.has(`${c.x},${c.y}`)
+      );
+      if (ends.length > 0) {
+        return ends[Math.floor(Math.random() * ends.length)];
+      }
     }
   }
 
-  // Hunt mode – fall back to random
+  // Try every neighbour of every active hit
+  const seen = new Set<string>();
+  const candidates: { x: number; y: number }[] = [];
+  for (const hit of activeHits) {
+    for (const [dx, dy] of DIRS) {
+      const nx = hit.x + dx;
+      const ny = hit.y + dy;
+      const key = `${nx},${ny}`;
+      if (
+        nx >= 0 && nx < 10 && ny >= 0 && ny < 10 &&
+        !attacked.has(key) && !seen.has(key)
+      ) {
+        seen.add(key);
+        candidates.push({ x: nx, y: ny });
+      }
+    }
+  }
+
+  if (candidates.length > 0) {
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  return null;
+}
+
+/** Easy: pick a purely random un-attacked cell */
+function chooseEasyTarget(prevMoves: Move[]): { x: number; y: number } {
+  const attacked = new Set(prevMoves.map((m) => `${m.x},${m.y}`));
+  const available: { x: number; y: number }[] = [];
+  for (let y = 0; y < 10; y++) {
+    for (let x = 0; x < 10; x++) {
+      if (!attacked.has(`${x},${y}`)) available.push({ x, y });
+    }
+  }
+  return available[Math.floor(Math.random() * available.length)];
+}
+
+/** Medium: hunt (random) / target (adjacent + line extend) */
+function chooseMediumTarget(prevMoves: Move[]): { x: number; y: number } {
+  const analysis = analyzeMoves(prevMoves);
+  return targetActiveHits(analysis) ?? chooseEasyTarget(prevMoves);
+}
+
+/**
+ * Hard: probability-density hunt / target.
+ *  – Target mode → same adjacent + line-extend logic as medium.
+ *  – Hunt mode   → score each cell by how many remaining-ship placements
+ *                  could include it; fire at the highest-scored cell.
+ */
+function chooseHardTarget(
+  prevMoves: Move[],
+  shipCount: number,
+): { x: number; y: number } {
+  const analysis = analyzeMoves(prevMoves);
+
+  // Target mode — reuse medium logic
+  const targetResult = targetActiveHits(analysis);
+  if (targetResult) return targetResult;
+
+  // Hunt mode — probability density
+  const { attacked } = analysis;
+  const missCells = new Set(
+    prevMoves.filter((m) => m.result === "miss").map((m) => `${m.x},${m.y}`)
+  );
+
+  // Determine which ship sizes are still afloat
+  const sunkTypes = new Set<string>(
+    prevMoves
+      .filter((m) => m.result === "sunk" && m.sunk_ship)
+      .map((m) => m.sunk_ship as string)
+  );
+  const allSizes = Array.from({ length: shipCount }, (_, i) => i + 1);
+  const sizeToType: Record<number, string> = {
+    1: "destroyer", 2: "submarine", 3: "cruiser", 4: "battleship", 5: "carrier",
+  };
+  const remainingSizes = allSizes.filter(
+    (s) => !sunkTypes.has(sizeToType[s] ?? "")
+  );
+
+  // Score each cell: count how many valid placements include it
+  const score: number[][] = Array.from({ length: 10 }, () => Array(10).fill(0));
+
+  for (const size of remainingSizes) {
+    for (const orient of ["h", "v"] as const) {
+      const rowMax = orient === "v" ? 10 - size : 10;
+      const colMax = orient === "h" ? 10 - size : 10;
+      for (let row = 0; row < rowMax; row++) {
+        for (let col = 0; col < colMax; col++) {
+          // Collect cells for this placement
+          const cells: { x: number; y: number }[] = [];
+          let valid = true;
+          for (let k = 0; k < size; k++) {
+            const cx = orient === "h" ? col + k : col;
+            const cy = orient === "v" ? row + k : row;
+            if (missCells.has(`${cx},${cy}`)) { valid = false; break; }
+            cells.push({ x: cx, y: cy });
+          }
+          if (!valid) continue;
+
+          // Increment score for each un-attacked cell in this placement
+          for (const c of cells) {
+            if (!attacked.has(`${c.x},${c.y}`)) {
+              score[c.y][c.x]++;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Pick the un-attacked cell with the highest score
+  let bestScore = -1;
+  const best: { x: number; y: number }[] = [];
+  for (let y = 0; y < 10; y++) {
+    for (let x = 0; x < 10; x++) {
+      if (attacked.has(`${x},${y}`)) continue;
+      if (score[y][x] > bestScore) {
+        bestScore = score[y][x];
+        best.length = 0;
+        best.push({ x, y });
+      } else if (score[y][x] === bestScore) {
+        best.push({ x, y });
+      }
+    }
+  }
+
+  if (best.length > 0) {
+    return best[Math.floor(Math.random() * best.length)];
+  }
+
   return chooseEasyTarget(prevMoves);
 }
 
 function chooseBotTarget(
   difficulty: string,
   prevMoves: Move[],
+  shipCount: number,
 ): { x: number; y: number } {
-  if (difficulty === "medium" || difficulty === "hard") {
-    return chooseMediumTarget(prevMoves);
-  }
+  if (difficulty === "hard") return chooseHardTarget(prevMoves, shipCount);
+  if (difficulty === "medium") return chooseMediumTarget(prevMoves);
   return chooseEasyTarget(prevMoves);
 }
 
@@ -401,7 +506,7 @@ export function BotGamePage() {
     botThinkingRef.current = true;
     const timeout = setTimeout(() => {
       setBotMoves((prev) => {
-        const target = chooseBotTarget(difficulty, prev);
+        const target = chooseBotTarget(difficulty, prev, shipCount);
         if (!target) {
           botThinkingRef.current = false;
           return prev;
