@@ -118,7 +118,10 @@ export function buildOpponentDisplay(
         grid[move.y][move.x] = "hit";
       }
     } else {
-      grid[move.y][move.x] = "miss";
+      // Only set to miss if not already hit or sunk
+      if (grid[move.y][move.x] !== "sunk" && grid[move.y][move.x] !== "hit") {
+        grid[move.y][move.x] = "miss";
+      }
     }
   }
 
@@ -160,7 +163,9 @@ export function buildMyDisplay(
         grid[move.y][move.x] = "sunk";
       }
     } else if (move.result === "miss") {
-      grid[move.y][move.x] = "miss";
+      if (grid[move.y][move.x] !== "sunk" && grid[move.y][move.x] !== "hit" && grid[move.y][move.x] !== "ship") {
+        grid[move.y][move.x] = "miss";
+      }
     }
   }
 
