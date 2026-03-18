@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { Button } from "../common/Button";
 import { SoundToggle } from "../common/SoundToggle";
+import { ScoreboardModal } from "./ScoreboardModal";
 import { Link } from "react-router";
 
 export function LobbyHeader() {
   const { user, profile, signOut } = useAuth();
+  const [showScoreboard, setShowScoreboard] = useState(false);
 
   const displayName =
     profile?.display_name ??
@@ -21,26 +24,39 @@ export function LobbyHeader() {
   };
 
   return (
-    <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-6 py-4">
-      <div className="flex items-center gap-4">
-        <h1 className="text-xl font-bold text-slate-100">Battleship</h1>
-        <span className="text-sm text-slate-400">
-          Welcome,{" "}
-          <span className="font-semibold text-blue-400">{displayName}</span>
-        </span>
-      </div>
-      <div className="flex items-center gap-3">
-        <SoundToggle />
-        <Link
-          to="/profile"
-          className="text-sm text-slate-400 transition-colors hover:text-slate-200"
-        >
-          Profile
-        </Link>
-        <Button variant="secondary" onClick={handleSignOut}>
-          Sign Out
-        </Button>
-      </div>
-    </header>
+    <>
+      <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-6 py-4">
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-bold text-slate-100">Battleship</h1>
+          <span className="text-sm text-slate-400">
+            Welcome,{" "}
+            <span className="font-semibold text-blue-400">{displayName}</span>
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          <SoundToggle />
+          <button
+            type="button"
+            onClick={() => setShowScoreboard(true)}
+            className="text-sm text-amber-400 transition-colors hover:text-amber-300 font-medium"
+          >
+            🏆 Scoreboard
+          </button>
+          <Link
+            to="/profile"
+            className="text-sm text-slate-400 transition-colors hover:text-slate-200"
+          >
+            Profile
+          </Link>
+          <Button variant="secondary" onClick={handleSignOut}>
+            Sign Out
+          </Button>
+        </div>
+      </header>
+      <ScoreboardModal
+        isOpen={showScoreboard}
+        onClose={() => setShowScoreboard(false)}
+      />
+    </>
   );
 }

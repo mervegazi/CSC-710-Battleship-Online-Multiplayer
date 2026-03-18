@@ -39,6 +39,10 @@ export function ProfilePage() {
                     <dt className="text-xs uppercase text-slate-500">Losses</dt>
                     <dd className="text-red-400">{profile.losses}</dd>
                   </div>
+                  <div>
+                    <dt className="text-xs uppercase text-slate-500">Total Points</dt>
+                    <dd className="text-amber-400 font-semibold">{profile.total_points.toLocaleString()}</dd>
+                  </div>
                 </div>
               </>
             )}

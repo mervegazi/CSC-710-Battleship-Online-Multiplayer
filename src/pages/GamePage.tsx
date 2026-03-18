@@ -24,7 +24,7 @@ import { boardFromFleet } from "../lib/gameLogic";
 export function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
   const [shipCount, setShipCount] = useState<number>(5);
   const [fleet, setFleet] = useState(() => createFleetState(5));
@@ -689,6 +689,8 @@ export function GamePage() {
             isWinner={winnerId === user.id}
             opponentName={opponentInfo?.displayName ?? "Opponent"}
             stats={endStats}
+            gamePoints={winnerId === user.id ? 100 : 0}
+            totalPoints={profile?.total_points ?? 0}
             onPlayAgain={() => navigate("/lobby", { state: { quickMatch: true } })}
           />
         )}

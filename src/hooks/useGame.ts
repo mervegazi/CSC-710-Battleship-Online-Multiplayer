@@ -57,6 +57,7 @@ async function updateProfileStats(winnerId: string, loserId: string) {
   await Promise.all([
     supabase.rpc("increment_wins", { player_id: winnerId }),
     supabase.rpc("increment_losses", { player_id: loserId }),
+    supabase.rpc("increment_points", { player_id: winnerId, pts: 100 }),
   ]);
 }
 

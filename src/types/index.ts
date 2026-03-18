@@ -26,6 +26,7 @@ export interface Profile {
   total_games: number;
   wins: number;
   losses: number;
+  total_points: number;
   created_at: string;
   last_seen: string;
 }
