@@ -4,6 +4,7 @@ import { BoardGrid } from "../components/game/BoardGrid";
 import { TurnIndicator } from "../components/game/TurnIndicator";
 import { GameEndModal } from "../components/game/GameEndModal";
 import type { GameStats } from "../components/game/GameEndModal";
+import { SpecialShotButton } from "../components/game/SpecialShotButton";
 import { SoundToggle } from "../components/common/SoundToggle";
 import { useAuth } from "../hooks/useAuth";
 import { useGame } from "../hooks/useGame";
@@ -63,6 +64,8 @@ export function GamePage() {
     endPlacementTurn,
     abandonGame,
     attack,
+    specialAttack,
+    specialShotUsed,
   } = useGame(gameId);
 
   const isSetup = gameStatus === "setup";
@@ -400,6 +403,12 @@ export function GamePage() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
+      <SpecialShotButton
+        isMyTurn={isMyTurn}
+        specialShotUsed={specialShotUsed}
+        isPlaying={isPlaying}
+        onSpecialAttack={specialAttack}
+      />
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
         <div className="flex items-center justify-between">
           <h1 className="text-lg sm:text-2xl font-bold flex items-center gap-2">

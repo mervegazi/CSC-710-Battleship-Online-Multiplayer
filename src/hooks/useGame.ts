@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import { soundService } from "../lib/soundService";
 import { useAuth } from "./useAuth";
@@ -46,10 +46,12 @@ export interface UseGameReturn {
   error: string | null;
   connectionStatus: ConnectionStatus;
   gameShipCount: number;
+  specialShotUsed: boolean;
   submitReady: (fleet: MatchShip[]) => Promise<void>;
   endPlacementTurn: (fleet: MatchShip[], shipSize: number, shipCount: number) => Promise<void>;
   abandonGame: () => Promise<void>;
   attack: (row: number, col: number) => Promise<void>;
+  specialAttack: (direction: "row" | "col", index: number) => Promise<void>;
 }
 
 async function updateProfileStats(winnerId: string, loserId: string) {
@@ -597,6 +599,165 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     [gameId, user, game, opponentPlayer, moves]
   );
 
+  // ── Special Shot — attack entire row or column ─────────────────────
+  // Detect if the current user already used their special shot
+  // by looking for 10+ consecutive moves by the same player
+  const specialShotUsed = useMemo(() => {
+    if (!user) return false;
+    const myMoves = moves.filter((m) => m.player_id === user.id);
+    if (myMoves.length < 10) return false;
+    // Sort by move_number
+    const sorted = [...myMoves].sort((a, b) => a.move_number - b.move_number);
+    // Look for a run of 10 consecutive move_numbers by same player
+    let streak = 1;
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].move_number === sorted[i - 1].move_number + 1) {
+        streak++;
+        if (streak >= 10) return true;
+      } else {
+        streak = 1;
+      }
+    }
+    return false;
+  }, [user, moves]);
+
+  const specialAttack = useCallback(
+    async (direction: "row" | "col", index: number) => {
+      if (!gameId || !user || !game || !opponentPlayer) return;
+      if (attackingRef.current) return;
+      if (game.current_turn !== user.id) return;
+      if (game.status !== "in_progress") return;
+      if (specialShotUsed) return;
+
+      attackingRef.current = true;
+
+      try {
+        const opponentBoard = opponentPlayer.board;
+        const myPreviousMoves = moves
+          .filter((m) => m.player_id === user.id)
+          .map((m) => ({ x: m.x, y: m.y }));
+
+        // Generate all 10 cells for the target row or column
+        const targets: { row: number; col: number }[] = [];
+        for (let i = 0; i < 10; i++) {
+          if (direction === "row") {
+            targets.push({ row: index, col: i });
+          } else {
+            targets.push({ row: i, col: index });
+          }
+        }
+
+        // Filter out already-attacked cells
+        const newTargets = targets.filter(
+          (t) => !myPreviousMoves.some((m) => m.x === t.col && m.y === t.row)
+        );
+
+        if (newTargets.length === 0) {
+          setError("All cells in this line have already been attacked.");
+          attackingRef.current = false;
+          return;
+        }
+
+        // Fetch current max move_number
+        const { data: maxRow } = await supabase
+          .from("moves")
+          .select("move_number")
+          .eq("game_id", gameId)
+          .order("move_number", { ascending: false })
+          .limit(1)
+          .single();
+
+        let moveNumber = (maxRow?.move_number ?? 0) + 1;
+        let accumulatedMoves = [...myPreviousMoves];
+        let updatedBoardShips = [...opponentBoard.ships];
+        let gameWon = false;
+        let hasHit = false;
+        let hasSunk = false;
+
+        // Process each cell attack sequentially
+        for (const target of newTargets) {
+          const currentBoard: BoardState = { ships: updatedBoardShips };
+          const { result, sunkShip } = resolveAttack(
+            currentBoard,
+            target.col,
+            target.row,
+            accumulatedMoves
+          );
+
+          if (result === "hit" || result === "sunk") hasHit = true;
+          if (sunkShip) hasSunk = true;
+
+          // Insert move to DB
+          await supabase.from("moves").upsert({
+            game_id: gameId,
+            player_id: user.id,
+            x: target.col,
+            y: target.row,
+            result,
+            sunk_ship: sunkShip?.type ?? null,
+            move_number: moveNumber,
+          }, { onConflict: "game_id,player_id,x,y", ignoreDuplicates: true });
+
+          accumulatedMoves.push({ x: target.col, y: target.row });
+          moveNumber++;
+
+          // Update ship sunk status if needed
+          if (sunkShip) {
+            updatedBoardShips = updatedBoardShips.map((s) =>
+              s.type === sunkShip.type ? { ...s, sunk: true } : s
+            );
+          }
+        }
+
+        // Update opponent's board in DB if any ships were sunk
+        if (hasSunk) {
+          await supabase
+            .from("games_players")
+            .update({ board: { ships: updatedBoardShips } })
+            .eq("game_id", gameId)
+            .eq("player_id", opponentPlayer.player_id);
+        }
+
+        // Play appropriate sound
+        if (hasSunk) {
+          soundService.play("sunk");
+        } else if (hasHit) {
+          soundService.play("explosion");
+        } else {
+          soundService.play("splash");
+        }
+
+        // Check win condition
+        if (checkWinByMoves({ ships: updatedBoardShips }, accumulatedMoves)) {
+          gameWon = true;
+          await supabase
+            .from("games")
+            .update({
+              status: "finished",
+              winner_id: user.id,
+              ended_at: new Date().toISOString(),
+            })
+            .eq("id", gameId);
+
+          await updateProfileStats(user.id, opponentPlayer.player_id);
+        }
+
+        if (!gameWon) {
+          // Switch turn to opponent
+          await supabase
+            .from("games")
+            .update({ current_turn: opponentPlayer.player_id })
+            .eq("id", gameId);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Special attack failed");
+      } finally {
+        attackingRef.current = false;
+      }
+    },
+    [gameId, user, game, opponentPlayer, moves, specialShotUsed]
+  );
+
   return {
     gameStatus,
     currentTurnPlayerId,
@@ -614,9 +775,11 @@ export function useGame(gameId: string | undefined): UseGameReturn {
     error,
     connectionStatus,
     gameShipCount,
+    specialShotUsed,
     submitReady,
     endPlacementTurn,
     abandonGame,
     attack,
+    specialAttack,
   };
 }
