@@ -27,6 +27,133 @@ const VALID_LEVELS = new Set(["easy", "medium", "hard"]);
 const BOT_GAME_ID = "bot-match";
 const BOT_PLAYER_ID = "bot";
 const PLAYER_ID = "player";
+const DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+const BOT_LABELS: Record<string, string> = {
+  easy: "Easy Bot",
+  medium: "Medium Bot",
+  hard: "Hard Bot",
+};
+
+// ── Bot AI helpers ──────────────────────────────────────────
+
+/** Easy: pick a purely random un-attacked cell */
+function chooseEasyTarget(prevMoves: Move[]): { x: number; y: number } {
+  const attacked = new Set(prevMoves.map((m) => `${m.x},${m.y}`));
+  const available: { x: number; y: number }[] = [];
+  for (let y = 0; y < 10; y++) {
+    for (let x = 0; x < 10; x++) {
+      if (!attacked.has(`${x},${y}`)) available.push({ x, y });
+    }
+  }
+  return available[Math.floor(Math.random() * available.length)];
+}
+
+/**
+ * Medium: hunt / target strategy.
+ *  – Hunt mode  → random cell (like easy)
+ *  – Target mode → when there are unsunk hits, try adjacent cells;
+ *                  if hits form a line, extend the line first.
+ */
+function chooseMediumTarget(prevMoves: Move[]): { x: number; y: number } {
+  const attacked = new Set(prevMoves.map((m) => `${m.x},${m.y}`));
+
+  const hitCells = prevMoves.filter((m) => m.result === "hit");
+  const sunkCells = prevMoves.filter((m) => m.result === "sunk");
+
+  // Mark cells belonging to already-sunk ships as resolved.
+  // From each sunk cell, trace consecutive hit neighbours in every direction.
+  const resolved = new Set<string>();
+  for (const s of sunkCells) {
+    resolved.add(`${s.x},${s.y}`);
+    for (const [dx, dy] of DIRS) {
+      let cx = s.x + dx;
+      let cy = s.y + dy;
+      while (hitCells.some((h) => h.x === cx && h.y === cy)) {
+        resolved.add(`${cx},${cy}`);
+        cx += dx;
+        cy += dy;
+      }
+    }
+  }
+
+  const activeHits = hitCells.filter((h) => !resolved.has(`${h.x},${h.y}`));
+
+  if (activeHits.length > 0) {
+    // If 2+ collinear contiguous hits, extend the line from its endpoints
+    if (activeHits.length >= 2) {
+      const sorted = [...activeHits].sort((a, b) =>
+        a.x !== b.x ? a.x - b.x : a.y - b.y
+      );
+      const dx = Math.sign(sorted[1].x - sorted[0].x);
+      const dy = Math.sign(sorted[1].y - sorted[0].y);
+
+      let isLine = Math.abs(dx) + Math.abs(dy) === 1;
+      if (isLine) {
+        for (let i = 1; i < sorted.length; i++) {
+          if (
+            sorted[i].x !== sorted[i - 1].x + dx ||
+            sorted[i].y !== sorted[i - 1].y + dy
+          ) {
+            isLine = false;
+            break;
+          }
+        }
+      }
+
+      if (isLine) {
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        const ends = [
+          { x: first.x - dx, y: first.y - dy },
+          { x: last.x + dx, y: last.y + dy },
+        ].filter(
+          (c) =>
+            c.x >= 0 && c.x < 10 && c.y >= 0 && c.y < 10 &&
+            !attacked.has(`${c.x},${c.y}`)
+        );
+        if (ends.length > 0) {
+          return ends[Math.floor(Math.random() * ends.length)];
+        }
+      }
+    }
+
+    // Otherwise try every neighbour of every active hit
+    const seen = new Set<string>();
+    const candidates: { x: number; y: number }[] = [];
+    for (const hit of activeHits) {
+      for (const [dx, dy] of DIRS) {
+        const nx = hit.x + dx;
+        const ny = hit.y + dy;
+        const key = `${nx},${ny}`;
+        if (
+          nx >= 0 && nx < 10 && ny >= 0 && ny < 10 &&
+          !attacked.has(key) && !seen.has(key)
+        ) {
+          seen.add(key);
+          candidates.push({ x: nx, y: ny });
+        }
+      }
+    }
+
+    if (candidates.length > 0) {
+      return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+  }
+
+  // Hunt mode – fall back to random
+  return chooseEasyTarget(prevMoves);
+}
+
+function chooseBotTarget(
+  difficulty: string,
+  prevMoves: Move[],
+): { x: number; y: number } {
+  if (difficulty === "medium" || difficulty === "hard") {
+    return chooseMediumTarget(prevMoves);
+  }
+  return chooseEasyTarget(prevMoves);
+}
 
 export function BotGamePage() {
   const location = useLocation();
@@ -53,6 +180,8 @@ export function BotGamePage() {
     const level = params.get("difficulty")?.toLowerCase() ?? "easy";
     return VALID_LEVELS.has(level) ? level : "easy";
   }, [location.search]);
+
+  const botName = BOT_LABELS[difficulty] ?? "Bot";
 
   const allShipsPlaced = fleet.every((ship) => ship.cells.length > 0);
   const shipCountLocked = phase !== "setup" || fleet.some((ship) => ship.cells.length > 0);
@@ -272,22 +401,11 @@ export function BotGamePage() {
     botThinkingRef.current = true;
     const timeout = setTimeout(() => {
       setBotMoves((prev) => {
-        const availableCells: { x: number; y: number }[] = [];
-        for (let y = 0; y < 10; y += 1) {
-          for (let x = 0; x < 10; x += 1) {
-            if (!prev.some((m) => m.x === x && m.y === y)) {
-              availableCells.push({ x, y });
-            }
-          }
-        }
-
-        if (availableCells.length === 0) {
+        const target = chooseBotTarget(difficulty, prev);
+        if (!target) {
           botThinkingRef.current = false;
           return prev;
         }
-
-        const target =
-          availableCells[Math.floor(Math.random() * availableCells.length)];
         const { result, sunkShip } = resolveAttack(playerBoard, target.x, target.y, prev);
 
         const nextMove: Move = {
@@ -320,7 +438,7 @@ export function BotGamePage() {
       clearTimeout(timeout);
       botThinkingRef.current = false;
     };
-  }, [phase, isMyTurn, playerBoard, botMoveNumber]);
+  }, [phase, isMyTurn, playerBoard, botMoveNumber, difficulty]);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -345,7 +463,7 @@ export function BotGamePage() {
         </div>
 
         {phase === "in_progress" && (
-          <TurnIndicator isMyTurn={isMyTurn} opponentName="Easy Bot" />
+          <TurnIndicator isMyTurn={isMyTurn} opponentName={botName} />
         )}
 
         {phase === "setup" && (
@@ -469,7 +587,7 @@ export function BotGamePage() {
             cells={opponentDisplayBoard}
             interactive={phase === "in_progress" && isMyTurn}
             onCellClick={handleOpponentCellClick}
-            title="Easy Bot Waters"
+            title={`${botName} Waters`}
           />
         </div>
 
@@ -492,7 +610,7 @@ export function BotGamePage() {
           <GameEndModal
             isOpen
             isWinner={checkWinByMoves(botBoard, playerMoves)}
-            opponentName="Easy Bot"
+            opponentName={botName}
             stats={endStats}
           />
         )}
