@@ -679,6 +679,7 @@ export function BotGamePage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 place-items-center">
           <BoardGrid
             cells={myDisplayBoard}
+            shipOverlays={phase === "setup" ? fleet : undefined}
             interactive={phase === "setup"}
             onCellClick={handleMyBoardCellClick}
             onCellDrop={handleMyBoardCellDrop}

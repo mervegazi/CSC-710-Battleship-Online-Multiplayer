@@ -636,6 +636,7 @@ export function GamePage() {
         <div className="hidden md:grid md:grid-cols-2 gap-6 md:gap-10 place-items-center">
           <BoardGrid
             cells={myDisplayBoard}
+            shipOverlays={isSetup ? fleet : undefined}
             interactive={isMyPlacementTurn}
             onCellClick={handleMyBoardCellClick}
             onCellDrop={handleMyBoardCellDrop}
@@ -658,6 +659,7 @@ export function GamePage() {
           {mobileTab === "my" ? (
             <BoardGrid
               cells={myDisplayBoard}
+              shipOverlays={isSetup ? fleet : undefined}
               interactive={isMyPlacementTurn}
               onCellClick={handleMyBoardCellClick}
               onCellDrop={handleMyBoardCellDrop}

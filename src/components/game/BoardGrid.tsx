@@ -1,5 +1,5 @@
 import { Fragment, useMemo } from "react";
-import type { CellState } from "../../types";
+import type { CellState, Coordinate, Orientation } from "../../types";
 import { BoardCell } from "./BoardCell";
 
 const COL_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
@@ -10,6 +10,11 @@ interface ShipInfo {
     startCol: number;
     length: number;
     orientation: "h" | "v";
+}
+
+export interface BoardShipOverlay {
+    cells: Coordinate[];
+    orientation: Orientation;
 }
 
 /** Detect all ships from the board cells */
@@ -136,6 +141,7 @@ function VerticalShipSVG({ length }: { length: number }) {
 
 interface BoardGridProps {
     cells: CellState[][];
+    shipOverlays?: BoardShipOverlay[];
     onCellClick?: (row: number, col: number) => void;
     onCellDrop?: (row: number, col: number) => void;
     onCellDragOver?: (row: number, col: number) => void;
@@ -148,6 +154,7 @@ interface BoardGridProps {
 
 export function BoardGrid({
     cells,
+    shipOverlays,
     onCellClick,
     onCellDrop,
     onCellDragOver,
@@ -157,8 +164,20 @@ export function BoardGrid({
     interactive = true,
     title,
 }: BoardGridProps) {
-    // Detect ships for overlay rendering
-    const ships = useMemo(() => detectShips(cells), [cells]);
+    const ships = useMemo(() => {
+        if (shipOverlays) {
+            return shipOverlays
+                .filter((ship) => ship.cells.length > 0)
+                .map((ship) => ({
+                    startRow: ship.cells[0].y,
+                    startCol: ship.cells[0].x,
+                    length: ship.cells.length,
+                    orientation: ship.orientation === "vertical" ? "v" : "h",
+                }));
+        }
+
+        return detectShips(cells);
+    }, [cells, shipOverlays]);
 
     return (
         <div className="flex flex-col items-center gap-2 w-full">
