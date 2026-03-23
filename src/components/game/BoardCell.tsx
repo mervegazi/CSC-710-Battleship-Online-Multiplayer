@@ -100,11 +100,12 @@ export function BoardCell({
         onDrop();
       }}
       className={`
-        aspect-square flex items-center justify-center overflow-hidden
+        relative aspect-square flex items-center justify-center overflow-hidden
         rounded-sm border border-slate-700/50
         text-[10px] sm:text-xs md:text-sm
         transition-colors duration-150
         disabled:cursor-default
+        ${isHit || isSunk ? "z-20" : "z-0"}
         ${previewStatus === "valid" ? "ring-2 ring-emerald-400" : ""}
         ${previewStatus === "invalid" ? "ring-2 ring-red-400" : ""}
         ${bgClass}

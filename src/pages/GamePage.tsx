@@ -155,6 +155,7 @@ export function GamePage() {
     !submittingTurn;
 
   const myDisplayBoard = isSetup && !isReady ? boardFromFleet(fleet) : gameBoardMy;
+  const myShipOverlays = isSetup ? fleet : myPlayer?.board?.ships;
 
   const endStats = useMemo<GameStats | null>(() => {
     if (!isFinished || !user) return null;
@@ -636,7 +637,7 @@ export function GamePage() {
         <div className="hidden md:grid md:grid-cols-2 gap-6 md:gap-10 place-items-center">
           <BoardGrid
             cells={myDisplayBoard}
-            shipOverlays={isSetup ? fleet : undefined}
+            shipOverlays={myShipOverlays}
             interactive={isMyPlacementTurn}
             onCellClick={handleMyBoardCellClick}
             onCellDrop={handleMyBoardCellDrop}
@@ -659,7 +660,7 @@ export function GamePage() {
           {mobileTab === "my" ? (
             <BoardGrid
               cells={myDisplayBoard}
-              shipOverlays={isSetup ? fleet : undefined}
+              shipOverlays={myShipOverlays}
               interactive={isMyPlacementTurn}
               onCellClick={handleMyBoardCellClick}
               onCellDrop={handleMyBoardCellDrop}

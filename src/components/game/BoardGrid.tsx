@@ -10,11 +10,35 @@ interface ShipInfo {
     startCol: number;
     length: number;
     orientation: "h" | "v";
+    hiddenIndices?: number[];
 }
 
 export interface BoardShipOverlay {
     cells: Coordinate[];
     orientation: Orientation;
+}
+
+function getOverlayShips(
+    shipOverlays: BoardShipOverlay[],
+    cells: CellState[][]
+): ShipInfo[] {
+    return shipOverlays.flatMap((ship) => {
+        if (ship.cells.length === 0) return [];
+
+        const sortedCells = [...ship.cells].sort((a, b) =>
+            ship.orientation === "vertical" ? a.y - b.y : a.x - b.x
+        );
+
+        return [{
+            startRow: sortedCells[0].y,
+            startCol: sortedCells[0].x,
+            length: sortedCells.length,
+            orientation: ship.orientation === "vertical" ? "v" : "h",
+            hiddenIndices: sortedCells.flatMap((cell, index) =>
+                cells[cell.y]?.[cell.x] === "ship" ? [] : [index]
+            ),
+        }];
+    });
 }
 
 /** Detect all ships from the board cells */
@@ -53,7 +77,7 @@ function detectShips(cells: CellState[][]): ShipInfo[] {
 }
 
 /** Horizontal ship SVG — scales width based on length */
-function HorizontalShipSVG({ length }: { length: number }) {
+function HorizontalShipSVG({ length, hiddenIndices = [], maskId }: { length: number; hiddenIndices?: number[]; maskId: string }) {
     const w = length * 40;
     const h = 40;
     // Hull proportions
@@ -72,6 +96,15 @@ function HorizontalShipSVG({ length }: { length: number }) {
             preserveAspectRatio="none"
             style={{ pointerEvents: "none" }}
         >
+            <defs>
+                <mask id={maskId}>
+                    <rect width={w} height={h} fill="white" />
+                    {hiddenIndices.map((index) => (
+                        <rect key={index} x={index * 40} y={0} width={40} height={40} fill="black" />
+                    ))}
+                </mask>
+            </defs>
+            <g mask={`url(#${maskId})`}>
             {/* Hull body */}
             <path
                 d={`M${bowX} ${h / 2} L${bowX + 12} ${hullTop} L${sternX - 6} ${hullTop} L${sternX} ${hullTop + 4} L${sternX} ${hullBot - 4} L${sternX - 6} ${hullBot} L${bowX + 12} ${hullBot} Z`}
@@ -92,12 +125,13 @@ function HorizontalShipSVG({ length }: { length: number }) {
                 const cx = bowX + 20 + i * ((w - 40) / Math.max(length - 1, 1));
                 return <circle key={i} cx={cx} cy={h / 2} r={2.5} fill="#1e3a5f" stroke="#3d5a6e" strokeWidth="0.6" />;
             })}
+            </g>
         </svg>
     );
 }
 
 /** Vertical ship SVG — scales height based on length */
-function VerticalShipSVG({ length }: { length: number }) {
+function VerticalShipSVG({ length, hiddenIndices = [], maskId }: { length: number; hiddenIndices?: number[]; maskId: string }) {
     const w = 40;
     const h = length * 40;
     const bowY = 4;
@@ -115,6 +149,15 @@ function VerticalShipSVG({ length }: { length: number }) {
             preserveAspectRatio="none"
             style={{ pointerEvents: "none" }}
         >
+            <defs>
+                <mask id={maskId}>
+                    <rect width={w} height={h} fill="white" />
+                    {hiddenIndices.map((index) => (
+                        <rect key={index} x={0} y={index * 40} width={40} height={40} fill="black" />
+                    ))}
+                </mask>
+            </defs>
+            <g mask={`url(#${maskId})`}>
             {/* Hull body */}
             <path
                 d={`M${w / 2} ${bowY} L${hullRight} ${bowY + 12} L${hullRight} ${sternY - 6} L${hullRight - 4} ${sternY} L${hullLeft + 4} ${sternY} L${hullLeft} ${sternY - 6} L${hullLeft} ${bowY + 12} Z`}
@@ -135,6 +178,7 @@ function VerticalShipSVG({ length }: { length: number }) {
                 const cy = bowY + 20 + i * ((h - 40) / Math.max(length - 1, 1));
                 return <circle key={i} cx={w / 2} cy={cy} r={2.5} fill="#1e3a5f" stroke="#3d5a6e" strokeWidth="0.6" />;
             })}
+            </g>
         </svg>
     );
 }
@@ -166,14 +210,10 @@ export function BoardGrid({
 }: BoardGridProps) {
     const ships = useMemo(() => {
         if (shipOverlays) {
-            return shipOverlays
-                .filter((ship) => ship.cells.length > 0)
-                .map((ship) => ({
-                    startRow: ship.cells[0].y,
-                    startCol: ship.cells[0].x,
-                    length: ship.cells.length,
-                    orientation: ship.orientation === "vertical" ? "v" : "h",
-                }));
+            return getOverlayShips(
+                shipOverlays.filter((ship) => ship.cells.length > 0),
+                cells
+            );
         }
 
         return detectShips(cells);
@@ -261,6 +301,7 @@ export function BoardGrid({
                         // +2 because row/col 1 is the header
                         const gridRowStart = ship.startRow + 2;
                         const gridColStart = ship.startCol + 2;
+                        const maskId = `ship-mask-${ship.orientation}-${ship.startRow}-${ship.startCol}-${idx}`;
 
                         return (
                             <div
@@ -278,9 +319,17 @@ export function BoardGrid({
                                 }}
                             >
                                 {ship.orientation === "h" ? (
-                                    <HorizontalShipSVG length={ship.length} />
+                                    <HorizontalShipSVG
+                                        length={ship.length}
+                                        hiddenIndices={ship.hiddenIndices}
+                                        maskId={maskId}
+                                    />
                                 ) : (
-                                    <VerticalShipSVG length={ship.length} />
+                                    <VerticalShipSVG
+                                        length={ship.length}
+                                        hiddenIndices={ship.hiddenIndices}
+                                        maskId={maskId}
+                                    />
                                 )}
                             </div>
                         );
