@@ -630,6 +630,7 @@ export function useGame(gameId: string | undefined): UseGameReturn {
       if (specialShotUsed) return;
 
       attackingRef.current = true;
+      soundService.play("special_shot");
 
       try {
         const opponentBoard = opponentPlayer.board;

@@ -13,7 +13,8 @@ export type SoundId =
   | "match_found"
   | "victory"
   | "defeat"
-  | "chat_receive";
+  | "chat_receive"
+  | "special_shot";
 
 const PREFS_KEY = "battleship_audio_prefs";
 
@@ -43,6 +44,7 @@ const SOUND_GAIN: Partial<Record<SoundId, number>> = {
   victory: 0.8,
   defeat: 0.7,
   chat_receive: 0.35,
+  special_shot: 0.9,
 };
 
 function detectAudioExt(): "ogg" | "mp3" {
@@ -157,6 +159,7 @@ class SoundService {
       "victory",
       "defeat",
       "chat_receive",
+      "special_shot",
     ];
 
     const ctx = this.getCtx();

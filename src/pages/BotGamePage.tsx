@@ -3,8 +3,9 @@ import { useLocation, useNavigate } from "react-router";
 import { BoardGrid } from "../components/game/BoardGrid";
 import { TurnIndicator } from "../components/game/TurnIndicator";
 import { GameEndModal } from "../components/game/GameEndModal";
+import { SpecialShotButton } from "../components/game/SpecialShotButton";
 import type { GameStats } from "../components/game/GameEndModal";
-import type { Move, Orientation } from "../types";
+import type { BoardState, Move, Orientation } from "../types";
 import {
   MAX_SHIP_COUNT,
   MIN_SHIP_COUNT,
@@ -22,6 +23,7 @@ import {
   convertFleetToBoard,
   resolveAttack,
 } from "../lib/gameLogic";
+import { soundService } from "../lib/soundService";
 
 const VALID_LEVELS = new Set(["easy", "medium", "hard"]);
 const BOT_GAME_ID = "bot-match";
@@ -260,6 +262,166 @@ function chooseBotTarget(
   return chooseEasyTarget(prevMoves);
 }
 
+// ── Bot Special-Shot AI ─────────────────────────────────────
+
+/**
+ * Decide whether the bot should use its one-time special shot this turn.
+ *  - Easy:   ~5 % random chance per turn, only after 10+ moves.
+ *  - Medium: fires when there are 2+ unsunk active hits.
+ *  - Hard:   fires when the best row/col probability-density score
+ *            exceeds a threshold, and at least 5 moves have been made.
+ */
+function shouldBotUseSpecialShot(
+  difficulty: string,
+  prevMoves: Move[],
+  shipCount: number,
+  playerBoard: BoardState,
+): boolean {
+  if (difficulty === "easy") {
+    return prevMoves.length >= 10 && Math.random() < 0.05;
+  }
+
+  if (difficulty === "medium") {
+    const { activeHits } = analyzeMoves(prevMoves);
+    return activeHits.length >= 2;
+  }
+
+  // hard
+  if (prevMoves.length < 5) return false;
+  const { bestScore } = scoreLinesForSpecial(prevMoves, shipCount, playerBoard);
+  // Fire when the best line has a very high density
+  return bestScore >= shipCount * 3;
+}
+
+/**
+ * Pick the direction + index for the bot's special shot.
+ *  - Easy:   random row or column.
+ *  - Medium: row/col containing the most active (unsunk) hits.
+ *  - Hard:   row/col with highest probability-density score.
+ */
+function chooseBotSpecialShotTarget(
+  difficulty: string,
+  prevMoves: Move[],
+  shipCount: number,
+  playerBoard: BoardState,
+): { direction: "row" | "col"; index: number } {
+  if (difficulty === "easy") {
+    const direction = Math.random() < 0.5 ? "row" : "col";
+    const index = Math.floor(Math.random() * 10);
+    return { direction, index } as { direction: "row" | "col"; index: number };
+  }
+
+  if (difficulty === "medium") {
+    const { activeHits, attacked } = analyzeMoves(prevMoves);
+
+    // Count active hits per row and per col
+    const rowHits = Array(10).fill(0) as number[];
+    const colHits = Array(10).fill(0) as number[];
+    for (const h of activeHits) {
+      rowHits[h.y]++;
+      colHits[h.x]++;
+    }
+
+    // Also count how many unattacked cells remain in each line (prefer lines with more open cells)
+    const rowOpen = Array(10).fill(0) as number[];
+    const colOpen = Array(10).fill(0) as number[];
+    for (let r = 0; r < 10; r++) {
+      for (let c = 0; c < 10; c++) {
+        if (!attacked.has(`${c},${r}`)) rowOpen[r]++;
+        if (!attacked.has(`${c},${r}`)) colOpen[c]++;
+      }
+    }
+
+    let bestDir: "row" | "col" = "row";
+    let bestIdx = 0;
+    let bestVal = -1;
+    for (let i = 0; i < 10; i++) {
+      const rScore = rowHits[i] * 10 + rowOpen[i];
+      if (rScore > bestVal) { bestVal = rScore; bestDir = "row"; bestIdx = i; }
+      const cScore = colHits[i] * 10 + colOpen[i];
+      if (cScore > bestVal) { bestVal = cScore; bestDir = "col"; bestIdx = i; }
+    }
+    return { direction: bestDir, index: bestIdx };
+  }
+
+  // hard — use probability density line scores
+  const { bestDir, bestIdx } = scoreLinesForSpecial(prevMoves, shipCount, playerBoard);
+  return { direction: bestDir, index: bestIdx };
+}
+
+/**
+ * Probability-density scoring for every row and column.
+ * Returns the best direction/index + its score.
+ */
+function scoreLinesForSpecial(
+  prevMoves: Move[],
+  shipCount: number,
+  _playerBoard: BoardState,
+): { bestDir: "row" | "col"; bestIdx: number; bestScore: number } {
+  const attacked = new Set(prevMoves.map((m) => `${m.x},${m.y}`));
+  const missCells = new Set(
+    prevMoves.filter((m) => m.result === "miss").map((m) => `${m.x},${m.y}`)
+  );
+
+  const sunkTypes = new Set<string>(
+    prevMoves
+      .filter((m) => m.result === "sunk" && m.sunk_ship)
+      .map((m) => m.sunk_ship as string)
+  );
+  const sizeToType: Record<number, string> = {
+    1: "destroyer", 2: "submarine", 3: "cruiser", 4: "battleship", 5: "carrier",
+  };
+  const remainingSizes = Array.from({ length: shipCount }, (_, i) => i + 1).filter(
+    (s) => !sunkTypes.has(sizeToType[s] ?? "")
+  );
+
+  // Cell-level scores
+  const cellScore: number[][] = Array.from({ length: 10 }, () => Array(10).fill(0));
+  for (const size of remainingSizes) {
+    for (const orient of ["h", "v"] as const) {
+      const rowMax = orient === "v" ? 10 - size : 10;
+      const colMax = orient === "h" ? 10 - size : 10;
+      for (let row = 0; row < rowMax; row++) {
+        for (let col = 0; col < colMax; col++) {
+          const cells: { x: number; y: number }[] = [];
+          let valid = true;
+          for (let k = 0; k < size; k++) {
+            const cx = orient === "h" ? col + k : col;
+            const cy = orient === "v" ? row + k : row;
+            if (missCells.has(`${cx},${cy}`)) { valid = false; break; }
+            cells.push({ x: cx, y: cy });
+          }
+          if (!valid) continue;
+          for (const c of cells) {
+            if (!attacked.has(`${c.x},${c.y}`)) cellScore[c.y][c.x]++;
+          }
+        }
+      }
+    }
+  }
+
+  // Sum scores per row and per col (only un-attacked cells)
+  const rowScores = Array(10).fill(0) as number[];
+  const colScores = Array(10).fill(0) as number[];
+  for (let r = 0; r < 10; r++) {
+    for (let c = 0; c < 10; c++) {
+      if (attacked.has(`${c},${r}`)) continue;
+      rowScores[r] += cellScore[r][c];
+      colScores[c] += cellScore[r][c];
+    }
+  }
+
+  let bestDir: "row" | "col" = "row";
+  let bestIdx = 0;
+  let bestScore = -1;
+  for (let i = 0; i < 10; i++) {
+    if (rowScores[i] > bestScore) { bestScore = rowScores[i]; bestDir = "row"; bestIdx = i; }
+    if (colScores[i] > bestScore) { bestScore = colScores[i]; bestDir = "col"; bestIdx = i; }
+  }
+
+  return { bestDir, bestIdx, bestScore };
+}
+
 export function BotGamePage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -278,6 +440,8 @@ export function BotGamePage() {
   const [botMoves, setBotMoves] = useState<Move[]>([]);
   const [playerMoveNumber, setPlayerMoveNumber] = useState(0);
   const [botMoveNumber, setBotMoveNumber] = useState(0);
+  const [playerSpecialShotUsed, setPlayerSpecialShotUsed] = useState(false);
+  const [botSpecialShotUsed, setBotSpecialShotUsed] = useState(false);
   const botThinkingRef = useRef(false);
 
   const difficulty = useMemo(() => {
@@ -374,6 +538,8 @@ export function BotGamePage() {
     setBotMoves([]);
     setPlayerMoveNumber(0);
     setBotMoveNumber(0);
+    setPlayerSpecialShotUsed(false);
+    setBotSpecialShotUsed(false);
     setPhase("setup");
   };
 
@@ -552,6 +718,63 @@ export function BotGamePage() {
     setIsMyTurn(false);
   };
 
+  // ── Player Special Attack ─────────────────────────────────────
+  const handlePlayerSpecialAttack = async (
+    direction: "row" | "col",
+    index: number,
+  ) => {
+    if (phase !== "in_progress" || !isMyTurn || playerSpecialShotUsed) return;
+
+    // Generate all 10 cells for the target row or column
+    const targets: { row: number; col: number }[] = [];
+    for (let i = 0; i < 10; i++) {
+      if (direction === "row") targets.push({ row: index, col: i });
+      else targets.push({ row: i, col: index });
+    }
+
+    // Filter out already-attacked cells
+    const newTargets = targets.filter(
+      (t) => !playerMoves.some((m) => m.x === t.col && m.y === t.row)
+    );
+    if (newTargets.length === 0) return;
+
+    let accumulatedMoves = [...playerMoves];
+    let moveNum = playerMoveNumber;
+    const newMoves: Move[] = [];
+
+    for (const target of newTargets) {
+      const { result, sunkShip } = resolveAttack(botBoard, target.col, target.row, accumulatedMoves);
+      moveNum++;
+      const move: Move = {
+        id: `p-${moveNum}-${target.col}-${target.row}`,
+        game_id: BOT_GAME_ID,
+        player_id: PLAYER_ID,
+        x: target.col,
+        y: target.row,
+        result,
+        sunk_ship: sunkShip?.type ?? null,
+        move_number: moveNum,
+        created_at: new Date().toISOString(),
+      };
+      newMoves.push(move);
+      accumulatedMoves = [...accumulatedMoves, move];
+    }
+
+    const allPlayerMoves = [...playerMoves, ...newMoves];
+    setPlayerMoves(allPlayerMoves);
+    setPlayerMoveNumber(moveNum);
+    setPlayerSpecialShotUsed(true);
+    soundService.play("special_shot");
+
+    if (checkWinByMoves(botBoard, allPlayerMoves)) {
+      setPhase("finished");
+      setIsMyTurn(false);
+      return;
+    }
+
+    setIsMyTurn(false);
+  };
+
   useEffect(() => {
     if (phase !== "in_progress" || isMyTurn) return;
     if (botThinkingRef.current) return;
@@ -559,6 +782,69 @@ export function BotGamePage() {
     botThinkingRef.current = true;
     const timeout = setTimeout(() => {
       setBotMoves((prev) => {
+        // ── Bot Special Shot check ──
+        if (
+          !botSpecialShotUsed &&
+          shouldBotUseSpecialShot(difficulty, prev, shipCount, playerBoard)
+        ) {
+          const { direction, index } = chooseBotSpecialShotTarget(
+            difficulty, prev, shipCount, playerBoard,
+          );
+
+          // Generate all 10 cells
+          const targets: { row: number; col: number }[] = [];
+          for (let i = 0; i < 10; i++) {
+            if (direction === "row") targets.push({ row: index, col: i });
+            else targets.push({ row: i, col: index });
+          }
+
+          // Filter already-attacked
+          const newTargets = targets.filter(
+            (t) => !prev.some((m) => m.x === t.col && m.y === t.row)
+          );
+
+          if (newTargets.length > 0) {
+            let accMoves = [...prev];
+            let moveNum = botMoveNumber;
+            const newMoves: Move[] = [];
+
+            for (const target of newTargets) {
+              const { result, sunkShip } = resolveAttack(
+                playerBoard, target.col, target.row, accMoves,
+              );
+              moveNum++;
+              const move: Move = {
+                id: `b-${moveNum}-${target.col}-${target.row}`,
+                game_id: BOT_GAME_ID,
+                player_id: BOT_PLAYER_ID,
+                x: target.col,
+                y: target.row,
+                result,
+                sunk_ship: sunkShip?.type ?? null,
+                move_number: moveNum,
+                created_at: new Date().toISOString(),
+              };
+              newMoves.push(move);
+              accMoves = [...accMoves, move];
+            }
+
+            const allBotMoves = [...prev, ...newMoves];
+            setBotMoveNumber(moveNum);
+            setBotSpecialShotUsed(true);
+
+            if (checkWinByMoves(playerBoard, allBotMoves)) {
+              setPhase("finished");
+              setIsMyTurn(false);
+            } else {
+              setIsMyTurn(true);
+            }
+
+            botThinkingRef.current = false;
+            return allBotMoves;
+          }
+        }
+
+        // ── Normal single-cell attack ──
         const target = chooseBotTarget(difficulty, prev, shipCount);
         if (!target) {
           botThinkingRef.current = false;
@@ -596,10 +882,16 @@ export function BotGamePage() {
       clearTimeout(timeout);
       botThinkingRef.current = false;
     };
-  }, [phase, isMyTurn, playerBoard, botMoveNumber, difficulty]);
+  }, [phase, isMyTurn, playerBoard, botMoveNumber, difficulty, botSpecialShotUsed]);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
+      <SpecialShotButton
+        isMyTurn={isMyTurn}
+        specialShotUsed={playerSpecialShotUsed}
+        isPlaying={phase === "in_progress"}
+        onSpecialAttack={handlePlayerSpecialAttack}
+      />
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-12">
         <div className="flex items-center justify-between">
           <div>
