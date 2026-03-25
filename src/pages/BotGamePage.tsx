@@ -383,6 +383,48 @@ export function BotGamePage() {
     setPlacementError(null);
   };
 
+  const handleShipDoubleClick = (shipId: string) => {
+    if (phase !== "setup") return;
+
+    const ship = fleet.find((s) => s.id === shipId);
+    if (!ship) return;
+
+    const nextOrientation: Orientation =
+      ship.orientation === "horizontal" ? "vertical" : "horizontal";
+
+    setSelectedShipId(ship.id);
+    setDraggedShipId(null);
+    setOrientation(nextOrientation);
+    setPreviewMap({});
+
+    if (ship.cells.length === 0) {
+      setPlacementError(null);
+      return;
+    }
+
+    const anchorCell = ship.cells[0];
+    const candidateCells = getShipCells(anchorCell.y, anchorCell.x, ship.size, nextOrientation);
+
+    if (!areCellsInBounds(candidateCells)) {
+      setPlacementError("Out of bounds: move start cell or rotate the ship.");
+      return;
+    }
+
+    if (hasOverlap(fleet, candidateCells, ship.id)) {
+      setPlacementError("Invalid placement: ships cannot overlap.");
+      return;
+    }
+
+    setFleet((prev) =>
+      prev.map((currentShip) =>
+        currentShip.id === ship.id
+          ? { ...currentShip, orientation: nextOrientation, cells: candidateCells }
+          : currentShip
+      )
+    );
+    setPlacementError(null);
+  };
+
   const placeShipAt = (shipId: string, row: number, col: number) => {
     const ship = fleet.find((s) => s.id === shipId);
     if (!ship) {
@@ -411,6 +453,17 @@ export function BotGamePage() {
   const handleMyBoardCellClick = (row: number, col: number) => {
     if (phase !== "setup") return;
     placeShipAt(selectedShipId, row, col);
+  };
+
+  const handleMyBoardCellDoubleClick = (row: number, col: number) => {
+    if (phase !== "setup") return;
+
+    const shipAtCell = fleet.find((ship) =>
+      ship.cells.some((cell) => cell.y === row && cell.x === col)
+    );
+
+    if (!shipAtCell) return;
+    handleShipDoubleClick(shipAtCell.id);
   };
 
   const handleMyBoardCellDrop = (row: number, col: number) => {
@@ -579,6 +632,9 @@ export function BotGamePage() {
             <p className="mt-2 text-xs text-slate-400">
               Drag ships onto the board or click a cell to place the selected ship.
             </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Double-click a ship to rotate it.
+            </p>
 
             <div className="mt-4 flex flex-wrap gap-2">
               {fleet.map((ship) => {
@@ -604,9 +660,11 @@ export function BotGamePage() {
                     onClick={() => {
                       setSelectedShipId(ship.id);
                       setDraggedShipId(null);
+                      setOrientation(ship.orientation);
                       setPreviewMap({});
                       setPlacementError(null);
                     }}
+                    onDoubleClick={() => handleShipDoubleClick(ship.id)}
                     className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
                       isSelected
                         ? "border-blue-400 bg-blue-600/20 text-blue-200"
@@ -682,6 +740,7 @@ export function BotGamePage() {
             shipOverlays={playerBoard.ships}
             interactive={phase === "setup"}
             onCellClick={handleMyBoardCellClick}
+            onCellDoubleClick={handleMyBoardCellDoubleClick}
             onCellDrop={handleMyBoardCellDrop}
             onCellDragOver={handleMyBoardCellDragOver}
             onCellDragStart={handleMyBoardCellDragStart}

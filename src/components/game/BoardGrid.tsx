@@ -187,6 +187,7 @@ interface BoardGridProps {
     cells: CellState[][];
     shipOverlays?: BoardShipOverlay[];
     onCellClick?: (row: number, col: number) => void;
+    onCellDoubleClick?: (row: number, col: number) => void;
     onCellDrop?: (row: number, col: number) => void;
     onCellDragOver?: (row: number, col: number) => void;
     onCellDragStart?: (row: number, col: number) => void;
@@ -200,6 +201,7 @@ export function BoardGrid({
     cells,
     shipOverlays,
     onCellClick,
+    onCellDoubleClick,
     onCellDrop,
     onCellDragOver,
     onCellDragStart,
@@ -271,6 +273,11 @@ export function BoardGrid({
                                     onClick={
                                         interactive && onCellClick
                                             ? () => onCellClick(rowIdx, colIdx)
+                                            : undefined
+                                    }
+                                    onDoubleClick={
+                                        interactive && onCellDoubleClick
+                                            ? () => onCellDoubleClick(rowIdx, colIdx)
                                             : undefined
                                     }
                                     onDrop={

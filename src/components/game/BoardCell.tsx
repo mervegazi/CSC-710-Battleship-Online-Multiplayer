@@ -11,6 +11,7 @@ interface BoardCellProps {
   state: CellState;
   label: string;
   onClick?: () => void;
+  onDoubleClick?: () => void;
   onDrop?: () => void;
   onDragOver?: () => void;
   onDragStart?: () => void;
@@ -47,6 +48,7 @@ export function BoardCell({
   state,
   label,
   onClick,
+  onDoubleClick,
   onDrop,
   onDragOver,
   onDragStart,
@@ -87,6 +89,7 @@ export function BoardCell({
       draggable={Boolean(onDragStart) && !disabled}
       disabled={disabled}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onDragStart={() => onDragStart?.()}
       onDragEnd={() => onDragEnd?.()}
       onDragOver={(event) => {

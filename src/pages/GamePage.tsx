@@ -261,6 +261,65 @@ export function GamePage() {
     setPlacementError(null);
   };
 
+  const handleShipDoubleClick = (shipId: string) => {
+    if (!isMyPlacementTurn) return;
+
+    const ship = fleet.find((s) => s.id === shipId);
+    if (!ship) return;
+
+    if (ship.size !== requiredShipSize) {
+      setPlacementError(`Only your 1x${requiredShipSize} ship can be rotated this turn.`);
+      return;
+    }
+
+    const nextOrientation: Orientation =
+      ship.orientation === "horizontal" ? "vertical" : "horizontal";
+
+    setSelectedShipId(ship.id);
+    setDraggedShipId(null);
+    setOrientation(nextOrientation);
+    setPreviewMap({});
+
+    if (ship.cells.length === 0) {
+      setPlacementError(null);
+      return;
+    }
+
+    const anchorCell = ship.cells[0];
+    const candidateCells = getShipCells(anchorCell.y, anchorCell.x, ship.size, nextOrientation);
+
+    if (!areCellsInBounds(candidateCells)) {
+      setPlacementError("Out of bounds: move start cell or rotate the ship.");
+      return;
+    }
+
+    if (hasOverlap(fleet, candidateCells, ship.id)) {
+      setPlacementError("Invalid placement: ships cannot overlap.");
+      return;
+    }
+
+    setFleet((prev) =>
+      prev.map((currentShip) =>
+        currentShip.id === ship.id
+          ? { ...currentShip, orientation: nextOrientation, cells: candidateCells }
+          : currentShip
+      )
+    );
+    setLocalPlacementDirty(true);
+    setPlacementError(null);
+  };
+
+  const handleMyBoardCellDoubleClick = (row: number, col: number) => {
+    if (!isMyPlacementTurn) return;
+
+    const shipAtCell = fleet.find((ship) =>
+      ship.cells.some((cell) => cell.y === row && cell.x === col)
+    );
+
+    if (!shipAtCell) return;
+    handleShipDoubleClick(shipAtCell.id);
+  };
+
   const placeShipAt = (shipId: string, row: number, col: number) => {
     if (!isMyPlacementTurn) {
       setPlacementError("Wait for your placement turn.");
@@ -493,6 +552,9 @@ export function GamePage() {
             <p className="mt-2 text-xs text-slate-400">
               Players place one ship per turn in order: 1x1, 1x2, 1x3, and so on.
             </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Double-click the current ship to rotate it.
+            </p>
 
             <div className="mt-3 rounded border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs text-slate-300">
               {isMyPlacementTurn ? (
@@ -536,9 +598,11 @@ export function GamePage() {
                       if (!isMyPlacementTurn || !isCurrentTurnShip) return;
                       setSelectedShipId(ship.id);
                       setDraggedShipId(null);
+                      setOrientation(ship.orientation);
                       setPreviewMap({});
                       setPlacementError(null);
                     }}
+                    onDoubleClick={() => handleShipDoubleClick(ship.id)}
                     className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${isSelected
                       ? "border-blue-400 bg-blue-600/20 text-blue-200"
                       : "border-slate-700 bg-slate-800 text-slate-200 hover:border-slate-500"
@@ -640,6 +704,7 @@ export function GamePage() {
             shipOverlays={myShipOverlays}
             interactive={isMyPlacementTurn}
             onCellClick={handleMyBoardCellClick}
+            onCellDoubleClick={handleMyBoardCellDoubleClick}
             onCellDrop={handleMyBoardCellDrop}
             onCellDragOver={handleMyBoardCellDragOver}
             onCellDragStart={handleMyBoardCellDragStart}
@@ -663,6 +728,7 @@ export function GamePage() {
               shipOverlays={myShipOverlays}
               interactive={isMyPlacementTurn}
               onCellClick={handleMyBoardCellClick}
+              onCellDoubleClick={handleMyBoardCellDoubleClick}
               onCellDrop={handleMyBoardCellDrop}
               onCellDragOver={handleMyBoardCellDragOver}
               onCellDragStart={handleMyBoardCellDragStart}
